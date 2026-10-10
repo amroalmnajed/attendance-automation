@@ -16,12 +16,12 @@
   - [x] Strengthen `gspread` exception handling and exponential backoff in `writer.py` and `session_resolver.py`.
 
 ## Phase 3: Bot Handler Resilience & Graceful Degradation
-- [ ] Task: Write Tests for Bot Resilience
-  - [ ] Mock underlying pipeline exceptions to verify the Telegram bot returns user-friendly error messages.
-- [ ] Task: Implement Bot Error Handling
-  - [ ] Update `ingest.py` handlers (e.g., `_run_pipeline_flow`, `handle_names_done`) to catch all unexpected exceptions.
-  - [ ] Ensure errors are safely logged and communicated to the user, averting hanging states.
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Write Tests for Bot Resilience
+  - [x] Mock underlying pipeline exceptions to verify the Telegram bot returns user-friendly error messages. -> Added `tests/test_bot_resilience.py`
+- [x] Task: Implement Bot Error Handling
+  - [x] Update `ingest.py` handlers (e.g., `_run_pipeline_flow`, `handle_names_done`) to catch all unexpected exceptions.
+  - [x] Ensure errors are safely logged and communicated to the user, averting hanging states.
+- [x ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 
 

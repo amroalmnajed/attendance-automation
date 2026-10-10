@@ -34,6 +34,7 @@ from telegram.ext import (
 from telegram.constants import ChatAction, ParseMode
 
 from core.logger import get_logger
+from attendance import _net
 from attendance.pipeline import run, run_text
 from attendance.normalizer import canonical_mark
 from attendance.review_queue import ReviewQueue
@@ -44,6 +45,9 @@ from attendance.aliases import AliasStore
 log = get_logger("ingest")
 
 COURSES = ["crash", "main", "g10", "g9"]
+
+# Max time the bot waits for a blocking pipeline run before telling the user.
+PIPELINE_TIMEOUT_S = 300.0
 
 # ── Conversation states ───────────────────────────────────────────────────────
 PHOTO_FLOW    = 1   # waiting for photo or inline buttons (image path)
@@ -56,6 +60,86 @@ NAMES_PASTE   = 6   # paste-names flow: waiting for the name list
 def _load_cfg(path: str = "config/attendance.yaml") -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+# ─── Error-handling helpers (Phase 3) ─────────────────────────────────────────
+
+class _PipelineTimeout(Exception):
+    """Pipeline did not finish within PIPELINE_TIMEOUT_S."""
+
+
+class _StaleSession(Exception):
+    """Conversation state (user_data) is missing — e.g. bot restarted mid-flow."""
+
+
+def _require(user_data: dict, *keys: str) -> list:
+    try:
+        return [user_data[k] for k in keys]
+    except KeyError as exc:
+        raise _StaleSession(str(exc)) from exc
+
+
+def _user_error_message(exc: BaseException, what: str = "sheet") -> str:
+    """Map an exception to a short user-safe message. Never includes str(exc)."""
+    if isinstance(exc, _PipelineTimeout):
+        return (f"❌ Processing the {what} took too long and was stopped. It may still finish "
+                "in the background — check /pending before sending it again.")
+    if isinstance(exc, _StaleSession):
+        return "⚠️ This session expired (the bot was restarted or reset). Please send /start and try again."
+    status = _net.http_status(exc)
+    if status == 429:
+        return "❌ Google services are busy right now (quota limit). Please wait a minute and try again."
+    if _net.is_network_error(exc) or status in _net.TRANSIENT_STATUS:
+        return "❌ Couldn't reach Google services (network problem). Please try again in a moment."
+    if status in (401, 403):
+        return "❌ The bot doesn't have permission to access the Google Sheet. Please contact the admin."
+    if isinstance(exc, OSError):
+        return "❌ A file the bot needs couldn't be read or saved. Please resend and try again."
+    return (f"❌ Something went wrong while processing the {what}. Please try again, "
+            "or contact the admin if it keeps happening.")
+
+
+async def _notify_failure(bot, chat_id: int, text: str, status_msg=None) -> None:
+    """Best-effort: edit the status message, else send a new one. Never raises."""
+    if status_msg is not None:
+        try:
+            await status_msg.edit_text(text)
+            return
+        except Exception:
+            pass
+    try:
+        await bot.send_message(chat_id=chat_id, text=text)
+    except Exception:
+        log.error("ingest_notify_failed", extra={"chat_id": chat_id}, exc_info=True)
+
+
+async def _run_blocking(fn):
+    """Run blocking fn in the default executor; raise _PipelineTimeout instead of hanging.
+
+    asyncio.wait (not wait_for) so a TimeoutError raised *inside* fn (e.g. a network
+    timeout) is not confused with our own timeout. The worker thread cannot be killed.
+    """
+    fut = asyncio.get_running_loop().run_in_executor(None, fn)
+    fut.add_done_callback(lambda f: f.cancelled() or f.exception())  # mark retrieved
+    done, _ = await asyncio.wait({fut}, timeout=PIPELINE_TIMEOUT_S)
+    if not done:
+        raise _PipelineTimeout()
+    return fut.result()
+
+
+async def _deliver_summary(chat_id: int, bot, summary, review_dir: str) -> None:
+    """Send the summary; a delivery failure must not be reported as a processing failure."""
+    try:
+        await _send_summary(chat_id, bot, summary, review_dir)
+    except Exception:
+        log.error("ingest_summary_delivery_failed",
+                  extra={"chat_id": chat_id, "upload_id": getattr(summary, "upload_id", None)},
+                  exc_info=True)
+        await _notify_failure(
+            bot, chat_id,
+            f"⚠️ Sheet processed (upload ID: {getattr(summary, 'upload_id', 'unknown')}), "
+            "but I couldn't display the summary. Use /pending to check review items.",
+        )
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
@@ -230,29 +314,35 @@ async def handle_upload_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
-    course       = context.user_data["course"]
-    session_num  = context.user_data["session"]
-    session_type = context.user_data["type"] if context.user_data["type"] != "Not Set" else None
-    img_path     = context.user_data["image_path"]
-
-    status_msg = await context.bot.send_message(
-        chat_id=chat_id,
-        text="⏳ Processing sheet (OpenCV + Gemini OCR + Google Sheets)...",
-    )
-    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-
-    cfg = _load_cfg()
-    review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
-
-    review_images_dir = Path("review_images")
-    review_images_dir.mkdir(parents=True, exist_ok=True)
-    persistent_img_path = review_images_dir / f"{uuid.uuid4().hex}{Path(img_path).suffix}"
-    shutil.copy2(img_path, persistent_img_path)
-
+    # Runs as a fire-and-forget task: an uncaught exception here would vanish and leave
+    # the user staring at "Processing…", so EVERYTHING is inside the try.
+    img_path = context.user_data.get("image_path")
+    status_msg = None
+    summary = None
+    review_dir = "review_queue"
     try:
-        loop = asyncio.get_event_loop()
-        summary = await loop.run_in_executor(
-            None,
+        course, session_num, utype, img_path = _require(
+            context.user_data, "course", "session", "type", "image_path")
+        session_type = utype if utype != "Not Set" else None
+
+        status_msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text="⏳ Processing sheet (OpenCV + Gemini OCR + Google Sheets)...",
+        )
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception:
+            pass  # cosmetic only
+
+        cfg = _load_cfg()
+        review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
+
+        review_images_dir = Path("review_images")
+        review_images_dir.mkdir(parents=True, exist_ok=True)
+        persistent_img_path = review_images_dir / f"{uuid.uuid4().hex}{Path(img_path).suffix}"
+        shutil.copy2(img_path, persistent_img_path)
+
+        summary = await _run_blocking(
             lambda: run(
                 image_path=str(persistent_img_path),
                 course=course,
@@ -262,23 +352,24 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 force=False,
                 config_path="config/attendance.yaml",
                 review_store_dir=review_dir,
-            ),
+            )
         )
-
-        await status_msg.delete()
-        await _send_summary(chat_id, context.bot, summary, review_dir)
-
     except Exception as exc:
-        log.error("ingest_pipeline_error", extra={"error": str(exc)})
+        log.error("ingest_pipeline_error",
+                  extra={"flow": "photo", "chat_id": chat_id, "error": str(exc)}, exc_info=True)
+        await _notify_failure(context.bot, chat_id, _user_error_message(exc, "sheet"), status_msg)
+    else:
         try:
-            await status_msg.edit_text(f"❌ Error processing sheet: {exc}")
+            await status_msg.delete()
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text=f"❌ Error processing sheet: {exc}")
-    finally:
-        try:
-            os.remove(img_path)
-        except OSError:
             pass
+        await _deliver_summary(chat_id, context.bot, summary, review_dir)
+    finally:
+        if img_path:
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
         context.user_data.clear()
 
 
@@ -389,29 +480,28 @@ async def handle_names_paste(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def handle_names_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User sent /done — run the text pipeline."""
+    """User sent /done — run the text pipeline. Always ends the conversation on failure."""
     names = context.user_data.get("nc_names", [])
     if not names:
         await update.message.reply_text("⚠️ No names collected yet. Send at least one name first.")
         return NAMES_PASTE
 
-    course   = context.user_data["nc_course"]
-    session  = context.user_data["nc_session"]
-    stype    = context.user_data.get("nc_type")
-    chat_id  = update.message.chat_id
-
-    await update.message.reply_text(
-        f"⏳ Processing *{len(names)}* name(s) for *{course.upper()} S{session}*…",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-    cfg = _load_cfg()
-    review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
-
+    chat_id = update.message.chat_id
+    summary = None
+    review_dir = "review_queue"
     try:
-        loop = asyncio.get_event_loop()
-        summary = await loop.run_in_executor(
-            None,
+        course, session = _require(context.user_data, "nc_course", "nc_session")
+        stype = context.user_data.get("nc_type")
+
+        await update.message.reply_text(
+            f"⏳ Processing *{len(names)}* name(s) for *{course.upper()} S{session}*…",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+        cfg = _load_cfg()
+        review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
+
+        summary = await _run_blocking(
             lambda: run_text(
                 names=names,
                 course=course,
@@ -421,12 +511,14 @@ async def handle_names_done(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 force=False,
                 config_path="config/attendance.yaml",
                 review_store_dir=review_dir,
-            ),
+            )
         )
-        await _send_summary(chat_id, context.bot, summary, review_dir)
     except Exception as exc:
-        log.error("ingest_text_pipeline_error", extra={"error": str(exc)})
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ Error processing names: {exc}")
+        log.error("ingest_text_pipeline_error",
+                  extra={"flow": "names", "chat_id": chat_id, "error": str(exc)}, exc_info=True)
+        await _notify_failure(context.bot, chat_id, _user_error_message(exc, "names"))
+    else:
+        await _deliver_summary(chat_id, context.bot, summary, review_dir)
     finally:
         context.user_data.clear()
 
@@ -936,6 +1028,16 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 
+async def _global_error_handler(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Catch-all for exceptions escaping any handler: log, and tell the user if we can."""
+    exc = context.error
+    log.error("ingest_unhandled_error",
+              extra={"error": str(exc), "update_type": type(update).__name__}, exc_info=exc)
+    chat = getattr(update, "effective_chat", None)
+    if chat is not None:
+        await _notify_failure(context.bot, chat.id, _user_error_message(exc, "request"))
+
+
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Cancelled.", reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
@@ -994,6 +1096,7 @@ def main() -> None:
     app.add_handler(CommandHandler("streaks", cmd_streaks))
     app.add_handler(CommandHandler("revert",  cmd_revert))
     app.add_handler(CommandHandler("pending", cmd_pending))
+    app.add_error_handler(_global_error_handler)
 
     log.info("telegram_bot_started", extra={"status": "polling"})
     print("Telegram bot is running. Send /start to begin.")
