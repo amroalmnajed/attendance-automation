@@ -1,0 +1,162 @@
+core:
+  app:
+    env: dev                        # dev | prod
+    timezone: Africa/Cairo
+    log_level: INFO
+    dry_run_default: false          # set false only after go-live checklist passes
+
+  auth:
+    credentials_env: GOOGLE_APPLICATION_CREDENTIALS  # unset on Cloud Run (attached SA)
+    secrets_backend: env            # env | gcp_secret_manager
+
+  notify:
+    channel: log                    # email | telegram | log
+    recipients_env: NOTIFY_TO
+    include_student_names: false
+
+  retention:
+    image_days: 30
+    flagged_image_days_after_resolve: 30
+    audit_log: keep
+
+attendance:
+  ingest:
+    channel: cli                    # google_form_drive | drive_folder | telegram | cli
+    poll_interval_s: 300
+    form_responses_sheet_id_env: INGEST_SHEET_ID
+    inbox_folder_id_env: INBOX_FOLDER_ID
+    fields:
+      course: Course
+      session: Session
+      type: Type
+      photo: Photo
+
+  ocr:
+    provider: gemini                # gemini | mock
+    model: gemini-3.5-flash         # Downgraded to 3.5 to bypass 429 quota exhaustion on 3.8
+    passes: 2
+    second_provider: null           # e.g. mock for testing independent-error second pass
+    min_confidence: 0.75            # rows below this threshold → OCR_LOW_CONFIDENCE review
+    send_roster_to_provider: true   # let the model see the real roster and propose a match
+                                     # itself instead of guessing a transliteration blind —
+                                     # this is what actually resolves ambiguous/partial names.
+    preprocess:
+      orient: true
+      deskew: true
+      contrast: mild
+      max_side_px: 2000
+      strip_exif: true
+
+  match:
+    t_high: 90                      # auto-accept threshold; must have score >= 90 AND margin >= 10
+    margin: 10
+    review_floor: 60
+    min_tokens_for_auto: 1
+    # Soft accept lane (DISABLED until `python tests/eval_matcher.py` confirms FAR=0%):
+    # accept when score >= t_soft AND lead >= margin_strong, even if score < t_high.
+    t_soft: null                    # e.g. 80
+    margin_strong: 20
+    # Learned aliases: reviewer decisions become future auto-accepts (per course).
+    learn_aliases: true
+    aliases_file: config/learned_aliases.json
+    alias_min_confirmations: 1      # raise to 2 to require two identical confirmations
+    weights:
+      token_sort: 0.5           # equal weighting: composite = 0.5*sort + 0.5*set
+      token_set: 0.5            # 0.9/0.1 caused MATCH_AMBIGUOUS on all shared-prefix names
+    variants_file: config/name_variants.yaml
+    hidden_rows: exclude            # exclude | include
+    skip_row_patterns:
+      - '\(Ref\)\s*$'               # row label "AAAAAAAAAAAAAAAA (Ref)" in all sheets
+    missing_student_policy: report  # ignore | report | mark_absent
+
+  write:
+    session_check: strict           # strict: SESSION_MISMATCH blocks the whole upload
+    overwrite: refuse               # refuse | force (force only via --force CLI flag)
+    values_source: sheet            # read dropdowns live; config values only for comparison
+    retry:
+      max_attempts: 6
+      base_s: 1.0
+      cap_s: 32.0
+      jitter: true
+
+  review:
+    store: local_json               # gcs_json | local_json
+    local_dir: review_queue
+    mirror_sheet_id_env: OPS_SHEET_ID
+    tab: Review
+
+  # Canonical attendance values — these are compared (case-insensitively) against live dropdowns.
+  attendance_values:
+    Present: Present
+    Late: Late
+    Not complete: Not complete
+    Absent: Absent
+
+  courses:
+    crash:
+      sheet_id_env: CRASH_SHEET_ID
+      tab: Crash-Attendance
+      layout: single                # single | typed_pair
+      name_col: A
+      header_row: 1                 # "Session N" in row 1
+      session_header_pattern: '^Session (\d+)$'
+      date_row: 2                   # text date e.g. "Saturday, July 4"
+      first_student_row: 5
+      hidden_rows: [9, 19]
+      hidden_cols: [B, C]
+      allowed_values: [Present, Late, Not complete, Absent]
+
+    main:
+      sheet_id_env: MAIN_SHEET_ID
+      tab: Main-Attendance
+      layout: single
+      name_col: A
+      header_row: 1                 # "Session N" confirmed by discover_sheets.py
+      session_header_pattern: '^Session (\d+)$'
+      date_row: 2
+      first_student_row: 5
+      hidden_cols: [B, C]
+      allowed_values: [Present, Late, Not complete, Absent]
+
+    g10:
+      sheet_id_env: G10_SHEET_ID
+      tab: Main-Attendance
+      layout: typed_pair            # type col left of "S(x) Attendance"
+      name_col: A
+      header_row: 1                 # "S1", "S1 Attendance", ...
+      session_header_pattern: '^S(\d+)$'
+      attendance_header_pattern: '^S(\d+) Attendance$'
+      first_student_row: 5
+      allowed_values: [Present, Late, Not complete, Absent]
+      types:
+        # Odd sessions (S1, S3, S5...) — compared with live sheet; mismatch = CONFIG_SHEET_DRIFT
+        odd:
+          - "Saturday - Center"
+          - "Saturday - Online"
+          - "Sunday- Center"         # exact sheet string (no space before Center)
+          - "Sunday- Online"          # exact sheet string
+          - "Monday - Online"
+        # Even sessions (S2, S4, S6...)
+        even:
+          - "Tuesday - Center"
+          - "Tuesday  - Online"       # exact sheet string (double-space)
+          - "Wednesday - Online"
+          - "Thursday - Center"
+          - "Thursday - Online"
+
+    g9:
+      sheet_id_env: G9_SHEET_ID
+      tab: Main-Attendance
+      layout: typed_pair
+      name_col: A
+      header_row: 1
+      session_header_pattern: '^S(\d+)$'
+      attendance_header_pattern: '^S(\d+) Attendance$'
+      first_student_row: 5
+      allowed_values: [Present, Late, Not complete, Absent]
+      types:
+        any:
+          - "Friday - Center"
+          - "Friday - Online"
+          - "Saturday - Center"
+          - "Saturday - Online"

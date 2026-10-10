@@ -1,0 +1,259 @@
+"""attendance/review_queue.py — Review queue: persist, list, and resolve flagged items.
+
+Flagged items are written to review_queue/<upload_id>.json (local) or GCS.
+Each item contains: image_ref, raw_name, top3 candidates with scores, reason_code.
+
+The `resolve` command picks a candidate and calls the writer.
+"""
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import pytz
+import yaml
+
+from attendance._fslock import atomic_write_json, file_lock
+from attendance.matcher import MatchResult, ReasonCode
+from attendance.ocr import OcrRow
+from core.logger import get_logger
+
+log = get_logger("review_queue")
+CAIRO = pytz.timezone("Africa/Cairo")
+
+# ─── Data ─────────────────────────────────────────────────────────────────────
+
+
+def _now_iso() -> str:
+    return datetime.now(CAIRO).isoformat()
+
+
+def _load_retention_cfg() -> dict:
+    """Load retention config from attendance.yaml."""
+    try:
+        with open("config/attendance.yaml", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("core", {}).get("retention", {})
+    except Exception:
+        return {}
+
+
+def _parse_iso(dt_str: str) -> datetime:
+    """Parse ISO format datetime string, assuming Cairo timezone if naive."""
+    dt = datetime.fromisoformat(dt_str)
+    if dt.tzinfo is None:
+        dt = CAIRO.localize(dt)
+    return dt
+
+
+# ─── Queue manager ────────────────────────────────────────────────────────────
+
+class ReviewQueue:
+    def __init__(self, store_dir: str = "review_queue"):
+        self._dir = Path(store_dir)
+        self._dir.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, upload_id: str) -> Path:
+        return self._dir / f"{upload_id}.json"
+
+    def _load(self, upload_id: str) -> dict:
+        p = self._path(upload_id)
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+        return {"upload_id": upload_id, "created_at": _now_iso(), "items": []}
+
+    def _save(self, upload_id: str, data: dict) -> None:
+        atomic_write_json(self._path(upload_id), data)
+
+    def get(self, upload_id: str, item_id: str) -> Optional[dict]:
+        """Return a single item (any status) or None."""
+        for item in self._load(upload_id).get("items", []):
+            if item["item_id"] == item_id:
+                return item
+        return None
+
+    def enqueue(
+        self,
+        *,
+        upload_id: str,
+        course: str,
+        session: int,
+        image_ref: str,
+        ocr_row: OcrRow,
+        match_result: MatchResult,
+        raw_mark: Optional[str],
+        session_type: Optional[str] = None,
+        reason: Optional[ReasonCode | str] = None,
+    ) -> str:
+        """Add a flagged item. Returns the item_id."""
+        item_id = str(uuid.uuid4())[:8]
+        reason_val = reason.value if isinstance(reason, ReasonCode) else (reason or match_result.reason.value)
+        item = {
+            "item_id": item_id,
+            "flagged_at": _now_iso(),
+            "status": "pending",
+            "image_ref": image_ref,
+            "course": course,
+            "session": session,
+            "paper_row_index": ocr_row.row_index,
+            "raw_name": ocr_row.raw_name,
+            "raw_mark": raw_mark,
+            "session_type": session_type,
+            "ocr_confidence": ocr_row.confidence,
+            "reason_code": reason_val,
+            "top3": [
+                {
+                    "roster_name": c.roster_name,
+                    "roster_row": c.roster_row,
+                    "score": round(c.score, 2),
+                }
+                for c in match_result.top3
+            ],
+        }
+
+        with file_lock(self._path(upload_id)):
+            data = self._load(upload_id)
+            data["items"].append(item)
+            self._save(upload_id, data)
+
+        log.info(
+            "review_enqueued",
+            extra={
+                "upload_id": upload_id,
+                "item_id": item_id,
+                "reason": match_result.reason.value,
+            },
+        )
+        return item_id
+
+    def list_pending(self, upload_id: Optional[str] = None) -> list[dict]:
+        """Return all pending review items, optionally filtered by upload_id."""
+        items = []
+        files = [self._path(upload_id)] if upload_id else sorted(self._dir.glob("*.json"))
+        for f in files:
+            if not f.exists():
+                continue
+            data = json.loads(f.read_text(encoding="utf-8"))
+            for item in data.get("items", []):
+                if item.get("status") == "pending":
+                    items.append({**item, "upload_id": data["upload_id"]})
+        return items
+
+    def resolve(
+        self,
+        upload_id: str,
+        item_id: str,
+        *,
+        chosen_roster_row: int,
+        chosen_roster_name: str,
+        attendance_value: str,
+        resolved_by: str = "cli",
+    ) -> dict:
+        """Mark an item as resolved and return its write specification.
+
+        Process-safe: holds a cross-process file lock for the read-modify-write cycle
+        (each Telegram callback runs resolve in its own subprocess, so threading locks
+        are insufficient). Raises ValueError if the item is already resolved.
+        """
+        with file_lock(self._path(upload_id)):
+            data = self._load(upload_id)
+            resolved_item = None
+            for item in data["items"]:
+                if item["item_id"] == item_id:
+                    if item.get("status") == "resolved":
+                        raise ValueError(f"Item {item_id} already resolved")
+                    item["status"] = "resolved"
+                    item["resolved_at"] = _now_iso()
+                    item["resolved_by"] = resolved_by
+                    item["resolution"] = {
+                        "roster_row": chosen_roster_row,
+                        "roster_name": chosen_roster_name,
+                        "attendance_value": attendance_value,
+                    }
+                    resolved_item = item
+                    break
+
+            if resolved_item is None:
+                raise KeyError(f"Item {item_id} not found in upload {upload_id}")
+
+            self._save(upload_id, data)
+        log.info(
+            "review_resolved",
+            extra={
+                "upload_id": upload_id,
+                "item_id": item_id,
+                "roster_row": chosen_roster_row,
+                "value": attendance_value,
+            },
+        )
+        return resolved_item
+
+    def cleanup_resolved_images(self, review_images_dir: str = "review_images") -> int:
+        """Delete image files for resolved items older than retention period.
+
+        Returns the number of images deleted.
+        """
+        retention_cfg = _load_retention_cfg()
+        days = int(retention_cfg.get("flagged_image_days_after_resolve", 30))
+        cutoff = datetime.now(CAIRO).timestamp() - (days * 86400)
+
+        images_dir = Path(review_images_dir)
+        if not images_dir.exists():
+            return 0
+
+        deleted = 0
+        for f in sorted(self._dir.glob("*.json")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            for item in data.get("items", []):
+                if item.get("status") != "resolved":
+                    continue
+                resolved_at_str = item.get("resolved_at")
+                if not resolved_at_str:
+                    continue
+                try:
+                    resolved_at = _parse_iso(resolved_at_str).timestamp()
+                except Exception:
+                    continue
+                if resolved_at < cutoff:
+                    image_ref = item.get("image_ref")
+                    if image_ref:
+                        img_path = Path(image_ref)
+                        # Only delete if it's in our review_images directory (safety)
+                        try:
+                            img_path.resolve().relative_to(images_dir.resolve())
+                        except ValueError:
+                            continue  # not in our managed directory
+                        try:
+                            img_path.unlink()
+                            deleted += 1
+                            log.info("review_image_pruned", extra={"image": str(img_path), "item_id": item["item_id"]})
+                        except OSError:
+                            pass
+        return deleted
+
+    def print_pending(self, upload_id: Optional[str] = None) -> None:
+        """Pretty-print all pending items to stdout."""
+        items = self.list_pending(upload_id)
+        if not items:
+            print("No pending review items.")
+            return
+
+        print(f"\n{'='*70}")
+        print(f"PENDING REVIEW ITEMS ({len(items)} total)")
+        print(f"{'='*70}")
+        for item in items:
+            print(f"\n  upload : {item['upload_id']} / item {item['item_id']}")
+            print(f"  reason : {item['reason_code']}")
+            print(f"  paper  : row {item['paper_row_index']} — {item['raw_name']!r}  mark={item['raw_mark']!r}")
+            print(f"  OCR    : confidence={item['ocr_confidence']:.2f}")
+            print(f"  top3   :")
+            for i, c in enumerate(item.get("top3", []), 1):
+                print(f"    [{i}] row={c['roster_row']:>4}  score={c['score']:>5.1f}  {c['roster_name']}")
+        print()

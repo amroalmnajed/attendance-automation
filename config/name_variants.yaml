@@ -1,0 +1,85 @@
+given_name_variants:
+  Gaidaa:
+    - Gidaa
+  Mohamed:
+    - Mohammed
+    - Muhammad
+    - Mohammad
+    - Mohamad
+    - Muhammed
+    - Mohmad
+  Abd:
+    - Abdel
+    - Abdul
+    - Abdal
+    - Abed
+  Ibrahim:
+    - Ebrahim
+    - Ibraheem
+  Youssef:
+    - Yousef
+    - Yusuf
+    - Yusef
+    - Josef
+  Ahmed:
+    - Ahmad
+    - Ahmd
+  Hassan:
+    - Hasan
+    - Hussan
+  Hussein:
+    - Hosein
+    - Hossein
+    - Hosain
+  Yassin:
+    - Yasin
+    - Yasseen
+    - Yaseen
+  Mahmoud:
+    - Mahmod
+    - Mahmood
+    - Mamoud
+  Mostafa:
+    - Moustafa      # covers "Eyad Mostafa" vs "Eyad Moustafa Wagdy Mostafa"
+    - Mustafa
+    - Mustafaa
+  Eyad:
+    - Iyad
+    - Ayad
+  Hamza:
+    - Hamzah
+  Maryam:
+    - Mariam
+    - Mariame
+  Hana:
+    - Hanna
+    - Hane
+  Shireen:
+    - Shereen       # covers "Shereen Walid" vs "Shireen Walid Mohamed Shafik Barakat"
+    - Shirin
+    - Sherine
+    - Shreen
+  Elsharkawy:
+    - El-Sharkawy   # covers "Farida Mohamed El-Sharkawy" vs "Farida Mohamed Elsharkawy"
+    - Sharkawy
+    - El Sharkawy
+
+prefix_particles:
+  # These prefixes attach/detach freely: El Dibany == Eldibany, Al == El
+  El:
+    - Al
+  Abd:
+    - Abdel
+    - Abdul
+    - Abd El
+    - Abd Al
+    - Abdel El
+
+  Morad:
+    - Mourad
+    - Murad
+  Abdelaziz:
+    - Abdel Aziz
+    - Abd El Aziz
+    - Abdel-Aziz
+
