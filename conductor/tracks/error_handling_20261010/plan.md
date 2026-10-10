@@ -1,7 +1,7 @@
 # Implementation Plan
 
 ## Phase 1: I/O and File Processing Error Handling
-- [ ] Task: Write Tests for I/O Failures
+- [~] Task: Write Tests for I/O Failures
   - [ ] Create or update unit tests mocking file read/write errors (e.g., missing config, missing images).
 - [ ] Task: Implement I/O Error Handling
   - [ ] Add `try/except` around `load_config` and file read/write operations with proper fallback/logging.
