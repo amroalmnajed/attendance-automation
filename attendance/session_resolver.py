@@ -15,8 +15,10 @@ import os
 from typing import Optional
 
 import gspread
+from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from google.oauth2.credentials import Credentials
 
+from attendance._net import retry_call
 from core.auth import get_credentials
 from core.logger import get_logger
 
@@ -77,8 +79,22 @@ class SheetSession:
         self._gc = gc
 
     def get_worksheet(self) -> gspread.Worksheet:
-        sh = self._gc.open_by_key(self.sheet_id)
-        return sh.worksheet(self.tab)
+        return _open_worksheet(self._gc, self.sheet_id, self.tab, {})
+
+
+def _open_worksheet(gc, sheet_id: str, tab: str, retry_kw: dict):
+    """Open sheet+tab with retry on transient errors; translate permanent ones."""
+    try:
+        return retry_call(
+            lambda: gc.open_by_key(sheet_id).worksheet(tab),
+            op="sheets_open_worksheet", context={"sheet_id": sheet_id, "tab": tab}, **retry_kw,
+        )
+    except WorksheetNotFound as exc:
+        raise ConfigSheetDrift(f"Tab '{tab}' not found in sheet {sheet_id}; check config 'tab'.") from exc
+    except SpreadsheetNotFound as exc:
+        raise ConfigSheetDrift(
+            f"Spreadsheet {sheet_id} not found or not shared with the service account."
+        ) from exc
 
 
 def resolve(
@@ -110,15 +126,19 @@ def resolve(
     hidden_rows_cfg: list[int] = course_cfg.get("hidden_rows", [])
 
     # ── Connect ───────────────────────────────────────────────────────────────
-    creds = get_credentials()
+    retry_kw = {k: v for k, v in cfg["attendance"].get("write", {}).get("retry", {}).items()
+                if k in ("max_attempts", "base_s", "cap_s", "jitter")}
+    creds = retry_call(get_credentials, op="gcp_credentials", **retry_kw)
     gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-    ws = sh.worksheet(tab)
+    ws = _open_worksheet(gc, sheet_id, tab, retry_kw)
 
     log.info("sheet_connected", extra={"course": course_key, "tab": tab, "sheet_id": sheet_id})
 
     # ── Read header row ───────────────────────────────────────────────────────
-    all_values = ws.get_all_values()
+    all_values = retry_call(
+        ws.get_all_values, op="sheets_get_all_values",
+        context={"course": course_key, "tab": tab}, **retry_kw,
+    )
     if len(all_values) < header_row:
         raise ConfigSheetDrift(f"Sheet has fewer rows than expected header row {header_row}")
 

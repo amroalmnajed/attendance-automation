@@ -10,14 +10,12 @@ Safety contract:
 """
 from __future__ import annotations
 
-import random
-import time
 from dataclasses import dataclass
 from typing import Optional
 
 import gspread
-from gspread.exceptions import APIError
 
+from attendance._net import retry_call
 from attendance.session_resolver import SheetSession
 from core.logger import audit_write, get_logger
 
@@ -50,26 +48,14 @@ def _with_backoff(
     base_s: float = 1.0,
     cap_s: float = 32.0,
     jitter: bool = True,
+    op: str = "sheets_api",
+    context: Optional[dict] = None,
 ):
-    """Call fn(), retrying on APIError with exponential backoff."""
-    for attempt in range(max_attempts):
-        try:
-            return fn()
-        except APIError as exc:
-            status = getattr(exc.response, "status_code", 0)
-            # Quota or transient — retry
-            if status in (429, 500, 502, 503) and attempt < max_attempts - 1:
-                delay = min(base_s * (2 ** attempt), cap_s)
-                if jitter:
-                    delay *= 0.5 + random.random() * 0.5
-                log.warning(
-                    "sheets_api_retry",
-                    extra={"attempt": attempt + 1, "status": status, "delay_s": round(delay, 2)},
-                )
-                time.sleep(delay)
-            else:
-                raise
-    raise RuntimeError("Exhausted retries")  # should not be reached
+    """Call fn(), retrying quota (429), 5xx, timeouts and connection errors with backoff."""
+    return retry_call(
+        fn, op=op, max_attempts=max_attempts, base_s=base_s, cap_s=cap_s,
+        jitter=jitter, context=context,
+    )
 
 
 # ─── Writer ───────────────────────────────────────────────────────────────────
@@ -110,7 +96,14 @@ def batch_write(
         return WriteResult(written=written, skipped=skipped, dry_run=True)
 
     # Build gspread batch update payload
-    ws = session.get_worksheet()
+    backoff_kw = dict(
+        max_attempts=int(retry.get("max_attempts", 6)),
+        base_s=float(retry.get("base_s", 1.0)),
+        cap_s=float(retry.get("cap_s", 32.0)),
+        jitter=bool(retry.get("jitter", True)),
+        context={"upload_id": upload_id, "course": session.course, "tab": session.tab},
+    )
+    ws = _with_backoff(session.get_worksheet, op="sheets_open_worksheet", **backoff_kw)
     updates: list[dict] = []
 
     for cell in cells:
@@ -127,13 +120,8 @@ def batch_write(
         def _do_update():
             ws.batch_update(updates, value_input_option="USER_ENTERED")
 
-        _with_backoff(
-            _do_update,
-            max_attempts=int(retry.get("max_attempts", 6)),
-            base_s=float(retry.get("base_s", 1.0)),
-            cap_s=float(retry.get("cap_s", 32.0)),
-            jitter=bool(retry.get("jitter", True)),
-        )
+        # Same payload re-sent on retry is idempotent (absolute cell values).
+        _with_backoff(_do_update, op="sheets_batch_update", **backoff_kw)
 
     # Also write the type cell if this is a typed_pair session
     # (Handled by the caller via a separate WriteCell in the cells list)

@@ -19,9 +19,14 @@ from typing import Optional
 
 from PIL import Image
 
+from attendance._net import http_status, is_transient, retry_call
 from core.logger import get_logger
 
 log = get_logger("ocr")
+
+
+class OcrUnavailableError(RuntimeError):
+    """Gemini could not produce a usable response (quota, outage, timeout, empty reply)."""
 
 
 # ─── Data model ───────────────────────────────────────────────────────────────
@@ -131,9 +136,21 @@ def _build_prompt(roster: Optional[list[str]]) -> str:
 class GeminiProvider(OcrProvider):
     """OCR via Google Gemini Flash (multimodal) using google-genai SDK."""
 
-    def __init__(self, model: str = "gemini-3.1-flash-lite", min_confidence: float = 0.75):
+    def __init__(
+        self,
+        model: str = "gemini-3.1-flash-lite",
+        min_confidence: float = 0.75,
+        timeout_s: float = 60.0,
+        max_attempts: int = 3,
+        base_s: float = 2.0,
+        cap_s: float = 16.0,
+    ):
         self.model_name = model
         self.min_confidence = min_confidence
+        self.timeout_s = timeout_s
+        self.max_attempts = max_attempts
+        self.base_s = base_s
+        self.cap_s = cap_s
         self._client = None  # lazy init
 
     def _get_client(self):
@@ -146,7 +163,11 @@ class GeminiProvider(OcrProvider):
                         "GEMINI_API_KEY env var is not set. "
                         "Get a key from https://aistudio.google.com/app/apikey"
                     )
-                self._client = genai.Client(api_key=api_key)
+                from google.genai import types as gtypes
+                self._client = genai.Client(
+                    api_key=api_key,
+                    http_options=gtypes.HttpOptions(timeout=int(self.timeout_s * 1000)),
+                )
             except ImportError:
                 raise ImportError(
                     "google-genai package not installed. Run: pip install google-genai"
@@ -186,39 +207,59 @@ class GeminiProvider(OcrProvider):
                 models_to_try.append(fb)
 
         response = None
-        last_error = None
+        last_error: Optional[BaseException] = None
+
+        def _call(model_name: str):
+            return client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=gtypes.GenerateContentConfig(
+                    temperature=0.0,   # deterministic output
+                    max_output_tokens=8192,
+                ),
+            )
 
         for model_candidate in models_to_try:
             try:
                 log.info("gemini_generating", extra={"model": model_candidate})
-                response = client.models.generate_content(
-                    model=model_candidate,
-                    contents=contents,
-                    config=gtypes.GenerateContentConfig(
-                        temperature=0.0,   # deterministic output
-                        max_output_tokens=8192,
-                    ),
+                # Retry timeouts / 5xx / connection errors on the same model.
+                # 429 is NOT retried here: quota is per-model, so fall through to the next one.
+                response = retry_call(
+                    lambda: _call(model_candidate),
+                    op="gemini_generate",
+                    max_attempts=self.max_attempts,
+                    base_s=self.base_s,
+                    cap_s=self.cap_s,
+                    include_quota=False,
+                    context={"model": model_candidate},
                 )
-                if response and response.text:
-                    break
             except Exception as exc:
                 last_error = exc
-                err_msg = str(exc)
-                if any(code in err_msg for code in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "404", "NOT_FOUND")):
+                if is_transient(exc) or http_status(exc) in (404,):
                     log.warning(
                         "gemini_model_fallback",
-                        extra={"failed_model": model_candidate, "error": err_msg[:120]},
+                        extra={"failed_model": model_candidate, "status": http_status(exc),
+                               "error": str(exc)[:120]},
                     )
                     continue
-                else:
-                    log.error("gemini_api_error", extra={"error": str(exc)})
-                    raise
+                log.error("gemini_api_error", extra={"model": model_candidate, "error": str(exc)[:300]})
+                raise
+            if response is not None and getattr(response, "text", None):
+                break
+            # Empty / blocked reply (e.g. safety filter): try the next model.
+            log.warning("gemini_empty_response", extra={"model": model_candidate})
+            response = None
 
         if response is None or not response.text:
-            log.error("gemini_all_models_failed", extra={"last_error": str(last_error)})
-            if last_error:
-                raise last_error
-            raise RuntimeError("Gemini returned empty response for all attempted models.")
+            log.error("gemini_all_models_failed", extra={"last_error": str(last_error)[:300]})
+            reason = (
+                f"last error: {last_error}" if last_error is not None
+                else "every model returned an empty response"
+            )
+            raise OcrUnavailableError(
+                f"Gemini OCR failed on all models ({', '.join(models_to_try)}) — "
+                f"quota exhausted or service unavailable; {reason}"
+            ) from last_error
 
         raw_text = response.text.strip()
         log.debug("gemini_raw_response", extra={"chars": len(raw_text)})
@@ -250,6 +291,10 @@ def _parse_gemini_response(raw: str) -> list[OcrRow]:
         # Return a single unreadable row rather than crashing the pipeline
         return [OcrRow(raw_name="[UNREADABLE]", status_mark=None, confidence=0.0, row_index=1)]
 
+    if not isinstance(items, list):
+        log.error("gemini_json_not_list", extra={"type": type(items).__name__, "raw": raw[:500]})
+        return [OcrRow(raw_name="[UNREADABLE]", status_mark=None, confidence=0.0, row_index=1)]
+
     rows: list[OcrRow] = []
     for i, item in enumerate(items):
         if not isinstance(item, dict):
@@ -260,8 +305,14 @@ def _parse_gemini_response(raw: str) -> list[OcrRow]:
         mark = item.get("status_mark")
         if mark is not None:
             mark = str(mark).strip() or None
-        conf = float(item.get("confidence", 0.5))
-        row_idx = int(item.get("row_index", i + 1))
+        try:
+            conf = float(item.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            conf = 0.0  # unparseable confidence → force human review
+        try:
+            row_idx = int(item.get("row_index", i + 1))
+        except (TypeError, ValueError):
+            row_idx = i + 1
         bounding_box = item.get("bounding_box")
 
         matched_roster_name = item.get("matched_roster_name")
@@ -321,7 +372,12 @@ def build_provider(cfg: dict) -> OcrProvider:
     min_conf = float(cfg.get("min_confidence", 0.75))
 
     if provider_name == "gemini":
-        return GeminiProvider(model=model, min_confidence=min_conf)
+        return GeminiProvider(
+            model=model,
+            min_confidence=min_conf,
+            timeout_s=float(cfg.get("timeout_s", 60)),
+            max_attempts=int(cfg.get("max_attempts", 3)),
+        )
     elif provider_name == "mock":
         return MockProvider()
 

@@ -35,6 +35,8 @@ attendance:
     provider: gemini                # gemini | mock
     model: gemini-3.5-flash         # Downgraded to 3.5 to bypass 429 quota exhaustion on 3.8
     passes: 2
+    timeout_s: 60                   # per-request Gemini HTTP timeout
+    max_attempts: 3                 # same-model retries for timeouts/5xx (429 → next model)
     second_provider: null           # e.g. mock for testing independent-error second pass
     min_confidence: 0.75            # rows below this threshold → OCR_LOW_CONFIDENCE review
     send_roster_to_provider: true   # let the model see the real roster and propose a match

@@ -1,0 +1,34 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Service account keys — NEVER commit
+*.json
+!config/name_variants.yaml
+
+# Logs
+logs/
+*.jsonl
+
+# Review queue
+review_queue/
+
+# Environment
+.env
+.envrc
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
