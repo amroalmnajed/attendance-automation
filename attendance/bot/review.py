@@ -17,6 +17,7 @@ from attendance.review_queue import ReviewQueue
 from attendance.session_resolver import resolve
 from attendance.writer import WriteCell, batch_write
 
+from attendance.bot.cards import format_review_card
 from attendance.bot.common import SEARCH_ROSTER, _guard, _load_cfg, _notify_failure, log
 
 
@@ -103,23 +104,8 @@ async def _send_next_review_item(chat_id: int, bot, upload_id: str, review_dir: 
     bbox      = item.get("bounding_box")
     crop_path = _crop_image(img_path, bbox) if bbox and os.path.exists(img_path) else img_path
 
-    keyboard = []
-    for match in item.get("top3", []):
-        cb_data  = f"res|{upload_id[:12]}|{item['item_id'][:8]}|{match['roster_row']}"
-        btn_text = f"[{match['score']}%] {match['roster_name']}"
-        keyboard.append([InlineKeyboardButton(btn_text, callback_data=cb_data)])
-
-    keyboard.append([
-        InlineKeyboardButton("❌ Absent", callback_data=f"res|{upload_id[:12]}|{item['item_id'][:8]}|absent"),
-        InlineKeyboardButton("🔍 Search", callback_data=f"srch|{upload_id[:12]}|{item['item_id'][:8]}"),
-    ])
-    keyboard.append([InlineKeyboardButton("⏭️ Skip / Ignore", callback_data=f"res|{upload_id[:12]}|{item['item_id'][:8]}|0")])
-
-    caption = (
-        f"⚠️ *Review Required ({current_idx} of {total})*\n"
-        f"Paper name: `{item['raw_name']}` (Row {item['paper_row_index']})\n"
-        f"Confidence: {item['ocr_confidence']*100:.0f}%"
-    )
+    caption, rows = format_review_card(item, upload_id=upload_id, position=(current_idx, total))
+    keyboard = [[InlineKeyboardButton(text, callback_data=data) for text, data in row] for row in rows]
 
     try:
         if os.path.exists(crop_path):
