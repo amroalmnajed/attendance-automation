@@ -28,5 +28,5 @@ pytest-cov>=4.0.0
 # python-json-logger>=2.0.0
 
 # Ingest channel
-python-telegram-bot>=20.0
+python-telegram-bot[job-queue]>=20.0
 

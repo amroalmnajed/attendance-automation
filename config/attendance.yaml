@@ -31,6 +31,83 @@ attendance:
       type: Type
       photo: Photo
 
+    # Paste-names flow (bot): "Ahmed Ali | L", "Sara - absent", "Omar, Late" ...
+    # always   = always ask "Does this look right?" after the preview
+    # on_issues = ask only when a mark is not recognised (default)
+    # never    = skip the preview entirely
+    names_preview: on_issues
+
+    # Several photos for ONE upload (a Telegram album, or photos sent in quick succession).
+    multi_photo:
+      enabled: true
+      max_photos: 6
+      append_window_s: 120          # a photo sent within this many seconds joins the open upload
+
+  # "Mark N absent?" button after an upload. crash and main ONLY: g9 / g10 can never be
+  # offered, even if listed here. Only EMPTY cells are written (overwrite: refuse still applies),
+  # real writes are audited (so /revert works) and a dry-run upload only previews.
+  # Telegram admins (bot commands like /aliases). IDs here are added to the ADMIN_TELEGRAM_IDS env var
+  # (comma-separated). If NO admin is configured anywhere, admin-only commands stay unavailable.
+  admin:
+    telegram_ids: [5674439345]
+
+  # Bot roles (Feature 11). IDs here are added to the TEACHER_TELEGRAM_IDS env var. Teachers can upload,
+  # paste names, tap "Mark N absent?" and undo (/revert). Admins can do everything (review, /report,
+  # /streaks, /pending, /aliases, /health). If NO teacher and NO admin is configured, everyone is allowed.
+  teacher:
+    telegram_ids: []
+
+  # Feature 12: missing-attendance reminders. OFF unless enabled. Needs python-telegram-bot[job-queue].
+  # Uses core.app.timezone. A reminder is sent once per expected class if no upload is recorded for that
+  # course on that date (counts come from the upload history, not from Google Sheets). Text has no names.
+  reminders:
+    enabled: true
+    grace_minutes: 60               # wait this long after the class end time before reminding
+    window_hours: 12                # stop trying this long after the class end time
+    check_every_minutes: 10
+    recipients: both                # admin | teacher | both
+    schedule: # e.g.  crash: [{day: mon, time: "18:00"}, {day: thu, time: "18:00"}]
+  reminders:
+    enabled: true
+    grace_minutes: 60
+    window_hours: 12
+    check_every_minutes: 10
+    recipients: both
+    schedule:
+      g10:
+        - {day: sat, time: "22:00"}
+        - {day: sun, time: "22:00"}
+        - {day: mon, time: "22:00"}
+        - {day: tue, time: "22:00"}
+        - {day: wed, time: "22:00"}
+        - {day: thu, time: "22:00"}
+      g9:
+        - {day: fri, time: "22:00"}
+        - {day: sat, time: "22:00"}    
+  # Feature 13: alerts to ADMINS (never teachers) when Gemini/Sheets keep failing or review items wait too long.
+  # Counts only, no names. One alert per kind per cooldown. Real uploads only (dry runs record nothing).
+  # The review-age check needs the scheduler; Gemini/Sheets alerts do not. Admin command: /health
+  health:
+    enabled: true
+    window_minutes: 60              # failures are counted over this rolling window
+    gemini_threshold: 5             # failed / rate-limited Gemini calls in the window (one per kind per read)
+    sheets_threshold: 3             # failed Sheets writes in the window
+    review_max_age_days: 3          # alert when an upload still has pending review items after this long
+    cooldown_minutes: 120           # minimum time between two alerts of the same kind
+
+  # Feature 6: post-write summary shows Present/Late/Absent/Review for this session and the
+  # previous session of the same course; warns when Present+Late fell by drop_threshold_pct or more.
+  summary_compare:
+    enabled: true
+    drop_threshold_pct: 30
+    min_previous: 5                 # ignore the comparison when the previous session had fewer attendees
+
+  absent_button:
+    enabled: true
+    courses: [crash, main]
+    min_matched: 3                  # never offer on a near-empty / unreadable upload
+    block_when_pending_review: true # tap is refused while this upload still has review items
+
   ocr:
     provider: gemini                # gemini | mock
     model: gemini-3.5-flash         # Downgraded to 3.5 to bypass 429 quota exhaustion on 3.8
@@ -38,6 +115,16 @@ attendance:
     timeout_s: 60                   # per-request Gemini HTTP timeout
     max_attempts: 3                 # same-model retries for timeouts/5xx (429 → next model)
     second_provider: null           # e.g. mock for testing independent-error second pass
+    # Feature 9: what the 2nd pass reads. Only used when passes: 2 (passes: 1 = single read, always).
+    #   full           = every row is read twice and merged (the original behaviour, default)
+    #   low_confidence = read everything once; re-read ONLY when some rows are below min_confidence
+    #                    (or, with send_roster_to_provider, have no roster match) and merge into just those rows.
+    #                    A clean sheet then costs ONE Gemini call instead of two.
+    second_pass:
+      mode: full                    # full | low_confidence
+      model: null                   # optional: a different Gemini model for the extra read (null = same model)
+      provider: null                # optional: a different provider for the extra read (gemini | mock)
+      include_unmatched: true       # low_confidence only: also re-read rows the model could not match to the roster
     min_confidence: 0.75            # rows below this threshold → OCR_LOW_CONFIDENCE review
     send_roster_to_provider: true   # let the model see the real roster and propose a match
                                      # itself instead of guessing a transliteration blind —
@@ -62,6 +149,13 @@ attendance:
     learn_aliases: true
     aliases_file: config/learned_aliases.json
     alias_min_confirmations: 1      # raise to 2 to require two identical confirmations
+    # Feature 15: spelling differences seen in reviewer decisions are collected as SUGGESTIONS here
+    # (never applied automatically). Review/approve them with:  aliases variants review
+    variant_learning:
+      enabled: true
+      suggestions_file: config/variant_suggestions.json
+      min_similarity: 0.7           # how alike two spellings must be to be suggested as the same name
+    alias_stale_days: 90            # aliases not used / not confirmed for this long are flagged as old
     weights:
       token_sort: 0.5           # equal weighting: composite = 0.5*sort + 0.5*set
       token_set: 0.5            # 0.9/0.1 caused MATCH_AMBIGUOUS on all shared-prefix names

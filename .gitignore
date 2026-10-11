@@ -32,3 +32,19 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test artifacts
+.pytest_tmp/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local key material (extensionless / non-.json files are NOT covered by *.json)
+*railway ssh keys*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Runtime data
+review_images/

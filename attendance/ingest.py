@@ -5,6 +5,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 import yaml
 import shutil
 import uuid
@@ -35,14 +36,27 @@ from telegram.constants import ChatAction, ParseMode
 
 from core.logger import get_logger
 from attendance import _net
-from attendance.pipeline import run, run_text
+from attendance import absent as absent_mod
+from attendance import marks as marks_mod
+from attendance.pipeline import run, run_multi, run_text
 from attendance.normalizer import canonical_mark
 from attendance.review_queue import ReviewQueue
 from attendance.writer import WriteCell, batch_write
 from attendance.session_resolver import resolve
+from attendance import alias_admin
+from attendance import roles
+from attendance import reminders as reminders_mod
+from attendance import health as health_mod
 from attendance.aliases import AliasStore
 
 log = get_logger("ingest")
+
+
+def _guard(level: str, conv: bool = False):
+    """Role check for a handler (Feature 11). Config/log are looked up at call time."""
+    return roles.guard(level, lambda: _load_cfg(), lambda: log,
+                       deny_return=ConversationHandler.END if conv else None)
+
 
 COURSES = ["crash", "main", "g10", "g9"]
 
@@ -56,6 +70,7 @@ NAMES_COURSE  = 3   # paste-names flow: waiting for course choice
 NAMES_SESSION = 4   # paste-names flow: waiting for session number
 NAMES_TYPE    = 5   # paste-names flow: waiting for session type
 NAMES_PASTE   = 6   # paste-names flow: waiting for the name list
+NAMES_CONFIRM = 7   # paste-names flow: waiting for "Process / Fix / Cancel" after the preview
 
 def _load_cfg(path: str = "config/attendance.yaml") -> dict:
     with open(path, encoding="utf-8") as f:
@@ -113,7 +128,7 @@ async def _notify_failure(bot, chat_id: int, text: str, status_msg=None) -> None
         log.error("ingest_notify_failed", extra={"chat_id": chat_id}, exc_info=True)
 
 
-async def _run_blocking(fn):
+async def _run_blocking(fn, timeout_s: float | None = None):
     """Run blocking fn in the default executor; raise _PipelineTimeout instead of hanging.
 
     asyncio.wait (not wait_for) so a TimeoutError raised *inside* fn (e.g. a network
@@ -121,7 +136,7 @@ async def _run_blocking(fn):
     """
     fut = asyncio.get_running_loop().run_in_executor(None, fn)
     fut.add_done_callback(lambda f: f.cancelled() or f.exception())  # mark retrieved
-    done, _ = await asyncio.wait({fut}, timeout=PIPELINE_TIMEOUT_S)
+    done, _ = await asyncio.wait({fut}, timeout=PIPELINE_TIMEOUT_S if timeout_s is None else timeout_s)
     if not done:
         raise _PipelineTimeout()
     return fut.result()
@@ -159,8 +174,25 @@ def _course_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row1, row2])
 
 
+def _input_settings() -> dict:
+    """Effective ``attendance.ingest`` options for the new input features. Never raises."""
+    try:
+        sect = (_load_cfg().get("attendance", {}) or {}).get("ingest", {}) or {}
+    except Exception:
+        sect = {}
+    multi = sect.get("multi_photo", {}) or {}
+    mode = str(sect.get("names_preview", "on_issues")).lower()
+    return {
+        "names_preview": mode if mode in ("always", "on_issues", "never") else "on_issues",
+        "multi_enabled": bool(multi.get("enabled", True)),
+        "max_photos": max(1, int(multi.get("max_photos", 6))),
+        "append_window_s": float(multi.get("append_window_s", 120)),
+    }
+
+
 # ─── /start ───────────────────────────────────────────────────────────────────
 
+@_guard("teacher", conv=True)
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📷 Send a photo of the sheet", callback_data="mode|photo")],
@@ -174,6 +206,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return PHOTO_FLOW
 
 
+@_guard("teacher", conv=True)
 async def handle_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry-point callback for the two-mode selector on /start."""
     query = update.callback_query
@@ -199,6 +232,7 @@ async def handle_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # ─── Image upload flow ────────────────────────────────────────────────────────
 
+@_guard("teacher", conv=True)
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.photo:
         photo_file = await update.message.photo[-1].get_file()
@@ -220,36 +254,89 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     img_path = tmp_dir / f"{photo_file.file_id}.jpg"
     await photo_file.download_to_drive(custom_path=img_path)
 
-    context.user_data["image_path"] = str(img_path)
-    context.user_data["course"]  = "g10"
-    context.user_data["session"] = 1
-    context.user_data["type"]    = "Not Set"
+    ud = context.user_data
+    opts = _input_settings()
+    now = time.monotonic()
+    group_id = getattr(update.message, "media_group_id", None)
+    existing: list[str] = list(ud.get("image_paths") or ([ud["image_path"]] if ud.get("image_path") else []))
 
-    # Parse optional caption
-    caption = update.message.caption or ""
-    if caption:
-        cap_lower = caption.lower()
-        for c in COURSES:
-            if c in cap_lower:
-                context.user_data["course"] = c
-                break
-        s_match = re.search(r"s(\d+)", cap_lower)
-        if s_match:
-            context.user_data["session"] = int(s_match.group(1))
+    # Another photo for the SAME upload: same Telegram album, or sent right after the
+    # previous one while the upload menu is still open.
+    same_upload = bool(existing) and opts["multi_enabled"] and (
+        (group_id is not None and group_id == ud.get("media_group_id"))
+        or (now - float(ud.get("last_photo_at", 0.0)) <= opts["append_window_s"])
+    )
 
-        if "saturday"  in cap_lower: context.user_data["type"] = "Saturday - Center"  if "center" in cap_lower else "Saturday - Online"
-        elif "sunday"  in cap_lower: context.user_data["type"] = "Sunday- Center"     if "center" in cap_lower else "Sunday- Online"
-        elif "monday"  in cap_lower: context.user_data["type"] = "Monday - Online"
-        elif "tuesday" in cap_lower: context.user_data["type"] = "Tuesday - Center"   if "center" in cap_lower else "Tuesday  - Online"
-        elif "wednesday" in cap_lower: context.user_data["type"] = "Wednesday - Online"
-        elif "thursday" in cap_lower: context.user_data["type"] = "Thursday - Center" if "center" in cap_lower else "Thursday - Online"
-        elif "friday"  in cap_lower: context.user_data["type"] = "Friday - Center"    if "center" in cap_lower else "Friday - Online"
+    if same_upload:
+        if str(img_path) in existing:
+            return PHOTO_FLOW                                  # same photo sent twice: ignore
+        if len(existing) >= opts["max_photos"]:
+            await update.message.reply_text(
+                f"📷 That's the maximum of {opts['max_photos']} photos for one upload — "
+                "I've kept the first ones. Tap ▶️ Start Processing when you're ready."
+            )
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
+            return PHOTO_FLOW
+        existing.append(str(img_path))
+        ud["image_paths"] = existing
+        ud["last_photo_at"] = now
+        if update.message.caption:
+            _apply_caption(ud, update.message.caption)
+        menu = ud.get("menu_message")
+        try:
+            if menu is None:
+                raise RuntimeError("no menu to update")
+            await _send_upload_menu(menu, context, edit=True)
+        except Exception:
+            await update.message.reply_text(f"📎 Photo {len(existing)} added. Tap ▶️ Start Processing when all photos are in.")
+        return PHOTO_FLOW
 
-    await _send_upload_menu(update.message, context)
+    # A brand-new upload: drop any abandoned photos from an earlier, unfinished one.
+    for old in existing:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+
+    ud["image_path"] = str(img_path)
+    ud["image_paths"] = [str(img_path)]
+    ud["media_group_id"] = group_id
+    ud["last_photo_at"] = now
+    ud["course"]  = "g10"
+    ud["session"] = 1
+    ud["type"]    = "Not Set"
+
+    if update.message.caption:
+        _apply_caption(ud, update.message.caption)
+
+    ud["menu_message"] = await _send_upload_menu(update.message, context)
     return PHOTO_FLOW
 
 
-async def _send_upload_menu(message, context, edit: bool = False) -> None:
+def _apply_caption(user_data: dict, caption: str) -> None:
+    """Parse an optional caption such as ``g10 s3 Saturday Center`` into the upload settings."""
+    cap_lower = caption.lower()
+    for c in COURSES:
+        if c in cap_lower:
+            user_data["course"] = c
+            break
+    s_match = re.search(r"s(\d+)", cap_lower)
+    if s_match:
+        user_data["session"] = int(s_match.group(1))
+
+    if "saturday"  in cap_lower: user_data["type"] = "Saturday - Center"  if "center" in cap_lower else "Saturday - Online"
+    elif "sunday"  in cap_lower: user_data["type"] = "Sunday- Center"     if "center" in cap_lower else "Sunday- Online"
+    elif "monday"  in cap_lower: user_data["type"] = "Monday - Online"
+    elif "tuesday" in cap_lower: user_data["type"] = "Tuesday - Center"   if "center" in cap_lower else "Tuesday  - Online"
+    elif "wednesday" in cap_lower: user_data["type"] = "Wednesday - Online"
+    elif "thursday" in cap_lower: user_data["type"] = "Thursday - Center" if "center" in cap_lower else "Thursday - Online"
+    elif "friday"  in cap_lower: user_data["type"] = "Friday - Center"    if "center" in cap_lower else "Friday - Online"
+
+
+async def _send_upload_menu(message, context, edit: bool = False):
     c = context.user_data["course"]
     s = context.user_data["session"]
     t = context.user_data["type"]
@@ -260,14 +347,17 @@ async def _send_upload_menu(message, context, edit: bool = False) -> None:
         [InlineKeyboardButton(f"Type: {t}",            callback_data="up|type")],
         [InlineKeyboardButton("▶️ Start Processing",   callback_data="up|start")],
     ]
-    text = "📋 *New Attendance Upload*\nPlease confirm the details:"
+    n_photos = len(context.user_data.get("image_paths") or [])
+    photos_line = f"📷 {n_photos} photos in this upload\n" if n_photos > 1 else ""
+    text = f"📋 *New Attendance Upload*\n{photos_line}Please confirm the details:"
 
     if edit:
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
-    else:
-        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
+        return message
+    return await message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
 
 
+@_guard("teacher", conv=True)
 async def handle_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -317,6 +407,7 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
     # Runs as a fire-and-forget task: an uncaught exception here would vanish and leave
     # the user staring at "Processing…", so EVERYTHING is inside the try.
     img_path = context.user_data.get("image_path")
+    tmp_paths: list[str] = list(context.user_data.get("image_paths") or ([img_path] if img_path else []))
     status_msg = None
     summary = None
     review_dir = "review_queue"
@@ -324,6 +415,8 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
         course, session_num, utype, img_path = _require(
             context.user_data, "course", "session", "type", "image_path")
         session_type = utype if utype != "Not Set" else None
+        if not tmp_paths:
+            tmp_paths = [img_path]
 
         status_msg = await context.bot.send_message(
             chat_id=chat_id,
@@ -339,21 +432,41 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
         review_images_dir = Path("review_images")
         review_images_dir.mkdir(parents=True, exist_ok=True)
-        persistent_img_path = review_images_dir / f"{uuid.uuid4().hex}{Path(img_path).suffix}"
-        shutil.copy2(img_path, persistent_img_path)
+        persistent_paths: list[Path] = []
+        for src in tmp_paths:
+            dest = review_images_dir / f"{uuid.uuid4().hex}{Path(src).suffix}"
+            shutil.copy2(src, dest)
+            persistent_paths.append(dest)
+        persistent_img_path = persistent_paths[0]
 
-        summary = await _run_blocking(
-            lambda: run(
-                image_path=str(persistent_img_path),
-                course=course,
-                session_num=session_num,
-                session_type=session_type,
-                dry_run=cfg["core"]["app"].get("dry_run_default", True),
-                force=False,
-                config_path="config/attendance.yaml",
-                review_store_dir=review_dir,
+        if len(persistent_paths) == 1:
+            summary = await _run_blocking(
+                lambda: run(
+                    image_path=str(persistent_img_path),
+                    course=course,
+                    session_num=session_num,
+                    session_type=session_type,
+                    dry_run=cfg["core"]["app"].get("dry_run_default", True),
+                    force=False,
+                    config_path="config/attendance.yaml",
+                    review_store_dir=review_dir,
+                )
             )
-        )
+        else:
+            # One upload, several photos: OCR each, merge rows, match and write once.
+            summary = await _run_blocking(
+                lambda: run_multi(
+                    image_paths=[str(p) for p in persistent_paths],
+                    course=course,
+                    session_num=session_num,
+                    session_type=session_type,
+                    dry_run=cfg["core"]["app"].get("dry_run_default", True),
+                    force=False,
+                    config_path="config/attendance.yaml",
+                    review_store_dir=review_dir,
+                ),
+                timeout_s=PIPELINE_TIMEOUT_S * len(persistent_paths),
+            )
     except Exception as exc:
         log.error("ingest_pipeline_error",
                   extra={"flow": "photo", "chat_id": chat_id, "error": str(exc)}, exc_info=True)
@@ -365,9 +478,9 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
             pass
         await _deliver_summary(chat_id, context.bot, summary, review_dir)
     finally:
-        if img_path:
+        for tmp in {p for p in [*tmp_paths, img_path] if p}:
             try:
-                os.remove(img_path)
+                os.remove(tmp)
             except OSError:
                 pass
         context.user_data.clear()
@@ -375,6 +488,7 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 # ─── Paste-names flow ─────────────────────────────────────────────────────────
 
+@_guard("teacher", conv=True)
 async def handle_names_course_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """nc|course|<course> — user picked a course."""
     query = update.callback_query
@@ -395,6 +509,7 @@ async def handle_names_course_callback(update: Update, context: ContextTypes.DEF
     return NAMES_SESSION
 
 
+@_guard("teacher", conv=True)
 async def handle_names_session_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """User typed the session number."""
     text = update.message.text.strip()
@@ -428,6 +543,7 @@ async def handle_names_session_text(update: Update, context: ContextTypes.DEFAUL
     return await _ask_for_names(update.message, context, course, session, None)
 
 
+@_guard("teacher", conv=True)
 async def handle_names_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """nc|type|<index> — user picked a session type."""
     query = update.callback_query
@@ -450,6 +566,8 @@ async def _ask_for_names(message, context, course: str, session: int, stype: str
         f"Course: *{course.upper()}* · Session: *S{session}*\n"
         f"{type_line}\n"
         "Now send me the names — *one name per message*, or all at once with each name on a new line.\n"
+        "Optional mark after a name: `Ahmed Ali | L`, `Sara - absent`, `Omar, Late` "
+        "(P / L / A / NC — no mark means Present).\n"
         "When you're done, send /done"
     )
     context.user_data["nc_names"] = []
@@ -462,6 +580,7 @@ async def _ask_for_names(message, context, course: str, session: int, stype: str
     return NAMES_PASTE
 
 
+@_guard("teacher", conv=True)
 async def handle_names_paste(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Accumulate pasted names. /done triggers processing."""
     text = update.message.text.strip()
@@ -479,22 +598,99 @@ async def handle_names_paste(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return NAMES_PASTE
 
 
+@_guard("teacher", conv=True)
 async def handle_names_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User sent /done — run the text pipeline. Always ends the conversation on failure."""
-    names = context.user_data.get("nc_names", [])
-    if not names:
+    """User sent /done — parse marks, show how each line was read, then run the text pipeline.
+
+    Always ends the conversation on failure. If a line has a mark we do not recognise
+    (and ``attendance.ingest.names_preview`` allows it) the user is asked to confirm first.
+    """
+    parsed = marks_mod.parse_lines(context.user_data.get("nc_names", []))
+    if not parsed:
         await update.message.reply_text("⚠️ No names collected yet. Send at least one name first.")
         return NAMES_PASTE
 
     chat_id = update.message.chat_id
+    try:
+        _require(context.user_data, "nc_course", "nc_session")
+        mode = _input_settings()["names_preview"]
+    except Exception as exc:
+        log.error("ingest_text_pipeline_error",
+                  extra={"flow": "names", "chat_id": chat_id, "error": str(exc)}, exc_info=True)
+        await _notify_failure(context.bot, chat_id, _user_error_message(exc, "names"))
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    names, marks = marks_mod.split_names_and_marks(parsed)
+
+    # Plain text (no parse_mode): names may contain Markdown-reserved characters.
+    if mode != "never":
+        try:
+            await update.message.reply_text(marks_mod.format_preview(parsed))
+        except Exception:
+            log.warning("names_preview_send_failed", extra={"chat_id": chat_id}, exc_info=True)
+
+    if mode == "always" or (mode == "on_issues" and marks_mod.has_issues(parsed)):
+        context.user_data["nc_parsed"] = list(zip(names, marks))
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Process now", callback_data="pv|go")],
+            [InlineKeyboardButton("✏️ Fix & resend", callback_data="pv|fix"),
+             InlineKeyboardButton("✖️ Cancel", callback_data="pv|cancel")],
+        ])
+        note = ("Lines marked ⚠️ will go to the review queue instead of being written. "
+                if marks_mod.has_issues(parsed) else "")
+        await update.message.reply_text(f"{note}Does this look right?", reply_markup=kb)
+        return NAMES_CONFIRM
+
+    return await _process_names(context, chat_id, names, marks)
+
+
+@_guard("teacher", conv=True)
+async def handle_names_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """pv|go / pv|fix / pv|cancel — answer to the parse preview."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split("|", 1)[1]
+    chat_id = query.message.chat_id
+
+    if action == "go":
+        try:
+            pending, _course, _session = _require(context.user_data, "nc_parsed", "nc_course", "nc_session")
+        except _StaleSession as exc:
+            await _notify_failure(context.bot, chat_id, _user_error_message(exc, "names"))
+            context.user_data.clear()
+            return ConversationHandler.END
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        names = [n for n, _ in pending]
+        marks = [m for _, m in pending]
+        return await _process_names(context, chat_id, names, marks)
+
+    if action == "fix":
+        context.user_data["nc_names"] = []
+        context.user_data.pop("nc_parsed", None)
+        await query.edit_message_text("✏️ No problem — send the corrected list, then /done.")
+        return NAMES_PASTE
+
+    context.user_data.clear()
+    await query.edit_message_text("✖️ Cancelled. Nothing was processed.")
+    return ConversationHandler.END
+
+
+async def _process_names(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
+                         names: list[str], marks: list[str]) -> int:
+    """Run the text pipeline for already-parsed names. Always ends the conversation."""
     summary = None
     review_dir = "review_queue"
     try:
         course, session = _require(context.user_data, "nc_course", "nc_session")
         stype = context.user_data.get("nc_type")
 
-        await update.message.reply_text(
-            f"⏳ Processing *{len(names)}* name(s) for *{course.upper()} S{session}*…",
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"⏳ Processing *{len(names)}* name(s) for *{course.upper()} S{session}*…",
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -504,6 +700,7 @@ async def handle_names_done(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         summary = await _run_blocking(
             lambda: run_text(
                 names=names,
+                marks=marks,
                 course=course,
                 session_num=session,
                 session_type=stype,
@@ -531,6 +728,10 @@ async def _send_summary(chat_id: int, bot, summary, review_dir: str) -> None:
     kb = []
     if summary.sheet_url:
         kb.append([InlineKeyboardButton("📊 Open Google Sheet", url=summary.sheet_url)])
+    missing_n = getattr(summary, "missing_count", 0)
+    if getattr(summary, "absent_offer", False) and isinstance(missing_n, int) and missing_n > 0:
+        label = f"🙈 Mark {missing_n} absent?" + (" (dry-run)" if getattr(summary, "dry_run", False) else "")
+        kb.append([InlineKeyboardButton(label, callback_data=f"abs|{summary.upload_id}")])
     kb.append([InlineKeyboardButton("🔄 Undo / Revert", callback_data=f"rev|{summary.upload_id}")])
 
     await bot.send_message(
@@ -631,6 +832,7 @@ async def _send_next_review_item(chat_id: int, bot, upload_id: str, review_dir: 
 
 # ─── Resolution callback ──────────────────────────────────────────────────────
 
+@_guard("admin")
 async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -736,6 +938,9 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
                     path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
                     min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
                 ).learn(course, target_item["raw_name"], roster_name)
+            if not cfg["core"]["app"].get("dry_run_default", True):
+                from attendance import variants as variants_mod      # Feature 15: suggestion only, no effect on matching
+                variants_mod.record_resolution(cfg, course, target_item["raw_name"], roster_name)
 
         queue.resolve(
             full_upload_id,
@@ -759,6 +964,7 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
 
 # ─── Search flow ──────────────────────────────────────────────────────────────
 
+@_guard("admin", conv=True)
 async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -778,6 +984,7 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
     return SEARCH_ROSTER
 
 
+@_guard("admin", conv=True)
 async def search_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     search_term    = update.message.text.lower()
     short_upload_id = context.user_data.get("search_upload_id")
@@ -833,6 +1040,7 @@ async def search_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # ─── Administrative commands ──────────────────────────────────────────────────
 
+@_guard("admin")
 async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parts = update.message.text.split()
     if len(parts) != 3:
@@ -860,6 +1068,7 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(f"❌ Error generating report: {e}")
 
 
+@_guard("admin")
 async def cmd_streaks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parts = update.message.text.split()
     if len(parts) < 2:
@@ -885,6 +1094,7 @@ async def cmd_streaks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"❌ Error: {e}")
 
 
+@_guard("teacher")
 async def cmd_revert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parts = update.message.text.split()
     if len(parts) < 2:
@@ -944,6 +1154,7 @@ async def cmd_revert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(f"❌ Error: {e}")
 
 
+@_guard("teacher")
 async def handle_revert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 🔄 Undo / Revert inline button (callback_data='rev|<upload_id>')."""
     query = update.callback_query
@@ -1003,6 +1214,74 @@ async def handle_revert_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(f"❌ Error: {e}")
 
 
+_ABSENT_INFLIGHT: set[str] = set()
+
+
+def _absent_result_text(res: "absent_mod.AbsentResult") -> str:
+    """User-facing text for the outcome of the 'Mark N absent?' button."""
+    if res.ok:
+        if res.dry_run:
+            return (f"🧪 [DRY-RUN] Would mark {res.marked} student(s) Absent. "
+                    "Nothing was written to the sheet.")
+        return (f"✅ Marked {res.marked} student(s) Absent."
+                + (f" {res.already_filled} already had a value and were left alone." if res.already_filled else "")
+                + "\nMade a mistake? Use Undo below.")
+    return {
+        "expired": "⚠️ That absent list has expired or was already handled, so nothing was changed. "
+                   "Send the sheet again if you still need it.",
+        "disabled": "ℹ️ Marking missing students absent isn't available for this course.",
+        "pending_review": (f"⏸ {res.pending_review} review item(s) from this upload are still pending — "
+                           "those students may actually be on the sheet. Resolve them first, then tap the button again."),
+        "value_not_allowed": "❌ This sheet doesn't have an “Absent” option in its dropdown, so I didn't write anything. "
+                             "Please contact the admin.",
+        "nothing_to_mark": "ℹ️ Nothing to mark — every student who wasn't on the sheet already has a value.",
+    }.get(res.reason, "❌ I couldn't mark anyone absent. Nothing was changed.")
+
+
+@_guard("teacher")
+async def handle_absent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the 🙈 Mark N absent? button (callback_data='abs|<upload_id>'). crash/main only."""
+    query = update.callback_query
+    await query.answer()
+    upload_id = query.data.split("|", 1)[1]
+    chat_id = query.message.chat_id
+
+    if upload_id in _ABSENT_INFLIGHT:
+        return                                   # double-tap while the first is still running
+    _ABSENT_INFLIGHT.add(upload_id)
+    try:
+        cfg = _load_cfg()
+        review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
+        res = await _run_blocking(
+            lambda: absent_mod.mark_missing_absent(upload_id, cfg=cfg, review_dir=review_dir))
+    except Exception as exc:
+        log.error("ingest_absent_error", extra={"chat_id": chat_id, "upload_id": upload_id, "error": str(exc)},
+                  exc_info=True)
+        await _notify_failure(context.bot, chat_id, _user_error_message(exc, "absent list"))
+        return
+    finally:
+        _ABSENT_INFLIGHT.discard(upload_id)
+
+    kb = None
+    if res.ok and not res.dry_run:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Undo these absences", callback_data=f"rev|{res.abs_id}")]])
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=_absent_result_text(res), reply_markup=kb)
+    except Exception:
+        log.error("ingest_absent_reply_failed", extra={"chat_id": chat_id}, exc_info=True)
+
+    if res.ok or res.reason in ("expired", "nothing_to_mark"):
+        # Take the button off the summary so it is not tapped twice (best effort).
+        try:
+            rows = query.message.reply_markup.inline_keyboard if query.message.reply_markup else []
+            kept = [[b for b in row if not str(b.callback_data or "").startswith("abs|")] for row in rows]
+            kept = [row for row in kept if row]
+            await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(kept) if kept else None)
+        except Exception:
+            pass
+
+
+@_guard("admin")
 async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     cfg        = _load_cfg()
     review_dir = Path(cfg["attendance"]["review"].get("local_dir", "review_queue"))
@@ -1028,6 +1307,44 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 
+@_guard("strict_admin")
+async def cmd_aliases(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin-only: /aliases [list [course] | flagged | remove <course> <paper name>].
+
+    Unavailable (not open to everyone) until an admin is configured: ADMIN_TELEGRAM_IDS env var
+    and/or attendance.admin.telegram_ids. Full role checks for every handler arrive in Phase 4.
+    """
+    try:
+        cfg = _load_cfg()
+        ids = alias_admin.admin_ids(cfg)
+        user = getattr(update, "effective_user", None)
+        uid = getattr(user, "id", None)
+        if not ids:
+            text = ("🔒 Alias management is unavailable: no admin is configured yet. "
+                    "Set ADMIN_TELEGRAM_IDS (or attendance.admin.telegram_ids) and restart the bot.")
+        elif uid not in ids:
+            text = "🔒 This command is for admins only."
+        else:
+            text = alias_admin.handle(list(getattr(context, "args", None) or []), cfg)
+    except Exception as exc:   # never log names; only the error type/message
+        log.error("aliases_cmd_failed", extra={"error": str(exc)})
+        text = "❌ Couldn't manage aliases right now. Please try again or use the command line."
+    await update.message.reply_text(text[:3900])
+
+
+@_guard("strict_admin")
+async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin-only: plain-language status (Gemini / Sheets failures, review age, last alerts, reminders)."""
+    try:
+        cfg = _load_cfg()
+        jq = getattr(getattr(context, "application", None), "job_queue", None)
+        text = health_mod.status_text(cfg, scheduler=jq is not None)
+    except Exception as exc:
+        log.error("health_cmd_failed", extra={"error": type(exc).__name__})
+        text = "❌ Couldn't read the system status right now. Please try again."
+    await update.message.reply_text(text[:3900])
+
+
 async def _global_error_handler(update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Catch-all for exceptions escaping any handler: log, and tell the user if we can."""
     exc = context.error
@@ -1038,6 +1355,7 @@ async def _global_error_handler(update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _notify_failure(context.bot, chat.id, _user_error_message(exc, "request"))
 
 
+@_guard("teacher", conv=True)
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Cancelled.", reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
@@ -1051,6 +1369,12 @@ def main() -> None:
     if not token:
         print("ERROR: TELEGRAM_BOT_TOKEN not found in .env", file=sys.stderr)
         sys.exit(1)
+
+    try:   # Feature 11: say clearly at startup who can use the bot
+        for _w in roles.startup_warnings(_load_cfg()):
+            log.warning("bot_access_warning", extra={"warning": _w})
+    except Exception as exc:
+        log.warning("bot_access_check_failed", extra={"error": type(exc).__name__})
 
     app = ApplicationBuilder().token(token).build()
 
@@ -1081,6 +1405,9 @@ def main() -> None:
                 CommandHandler("done", handle_names_done),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_names_paste),
             ],
+            NAMES_CONFIRM: [
+                CallbackQueryHandler(handle_names_confirm, pattern=r"^pv\|"),
+            ],
             SEARCH_ROSTER: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, search_input_handler),
                 MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo),
@@ -1092,11 +1419,25 @@ def main() -> None:
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_resolution_callback, pattern=r"^res\|"))
     app.add_handler(CallbackQueryHandler(handle_revert_callback,     pattern=r"^rev\|"))
+    app.add_handler(CallbackQueryHandler(handle_absent_callback,     pattern=r"^abs\|"))
     app.add_handler(CommandHandler("report",  cmd_report))
     app.add_handler(CommandHandler("streaks", cmd_streaks))
     app.add_handler(CommandHandler("revert",  cmd_revert))
     app.add_handler(CommandHandler("pending", cmd_pending))
+    app.add_handler(CommandHandler("aliases", cmd_aliases))
+    app.add_handler(CommandHandler("health",  cmd_health))
     app.add_error_handler(_global_error_handler)
+
+    try:   # Feature 13: remember where health state lives, schedule the review-age check
+        health_mod.configure(_load_cfg())
+        health_mod.install(app, _load_cfg)
+    except Exception as exc:
+        log.warning("health_install_failed", extra={"error": type(exc).__name__})
+
+    try:   # Feature 12: optional reminders; a missing scheduler package never stops the bot
+        reminders_mod.install(app, _load_cfg)
+    except Exception as exc:
+        log.warning("reminders_install_failed", extra={"error": type(exc).__name__})
 
     log.info("telegram_bot_started", extra={"status": "polling"})
     print("Telegram bot is running. Send /start to begin.")

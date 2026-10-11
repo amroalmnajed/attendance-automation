@@ -29,6 +29,19 @@ class RunSummary:
     review_url: Optional[str] = None
     sheet_url: Optional[str] = None
     dry_run: bool = False
+    # "Mark missing students absent" offer (crash/main only). Counts only: student
+    # names must never be stored on the summary because send() logs the whole object.
+    absent_offer: bool = False
+    missing_count: int = 0
+    missing_held_back: int = 0
+    photo_count: int = 1
+    # Feature 6: per-session counts (numbers only) + last session's counts for the same course.
+    present_count: int = 0
+    late_count: int = 0
+    absent_count: int = 0
+    prev_counts: Optional[dict] = None
+    prev_session: str = ""
+    drop_warning: str = ""
 
     def text(self) -> str:
         # Polished Telegram-friendly card format
@@ -44,6 +57,24 @@ class RunSummary:
         ]
         if self.unmatched > 0:
             lines.append(f"❓ *Unmatched:*  {self.unmatched}")
+        if (self.present_count + self.late_count + self.absent_count) > 0:
+            lines.append(
+                f"📊 *This session:* Present {self.present_count} · Late {self.late_count}"
+                f" · Absent {self.absent_count} · Review {self.flagged}"
+            )
+            pc = self.prev_counts if isinstance(self.prev_counts, dict) else None
+            if pc:
+                lines.append(
+                    f"↩️ *Previous (S{self.prev_session}):* Present {pc.get('present', 0)}"
+                    f" · Late {pc.get('late', 0)} · Absent {pc.get('absent', 0)}"
+                )
+            if self.drop_warning:
+                lines.append(f"📉 *{self.drop_warning}*")
+        if self.photo_count > 1:
+            lines.append(f"📷 *Photos:*     {self.photo_count} (merged)")
+        if self.absent_offer and self.missing_count > 0:
+            held = f" ({self.missing_held_back} held back — possible matches in review)" if self.missing_held_back else ""
+            lines.append(f"🙈 *Not on sheet:* {self.missing_count}{held}")
             
         if self.errors:
             lines.append(f"\n❌ *Errors:*")
@@ -110,3 +141,29 @@ def _send_telegram(summary: RunSummary) -> None:
             log.info("telegram_sent", extra={"status": resp.status})
     except Exception as exc:
         log.error("telegram_failed", extra={"error": str(exc)})
+
+
+def send_text(text: str, chat_ids) -> int:
+    """Plain-text Telegram message to specific chats (reminders and health alerts).
+
+    Returns how many chats received it. Never raises. The caller must not put student names in
+    ``text`` (counts and course/session labels only); the text itself is not logged.
+    """
+    import urllib.parse
+    import urllib.request
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    ids = [c for c in dict.fromkeys(chat_ids or [])]
+    if not (token and ids):
+        log.warning("text_notify_skipped", extra={"reason": "no bot token or no recipients"})
+        return 0
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    sent = 0
+    for chat_id in ids:
+        data = urllib.parse.urlencode({"chat_id": chat_id, "text": str(text)[:3900]}).encode()
+        try:
+            with urllib.request.urlopen(url, data=data, timeout=10):
+                sent += 1
+        except Exception as exc:   # token is in the URL: log the error type only
+            log.error("text_notify_failed", extra={"error": type(exc).__name__})
+    return sent

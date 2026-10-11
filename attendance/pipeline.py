@@ -12,11 +12,15 @@ from typing import Optional
 
 import yaml
 
+from attendance import absent as absent_mod
+from attendance import health as health_mod
+from attendance import history as history_mod
 from attendance.gates import check_all_gates
 from attendance.aliases import AliasStore
 from attendance.matcher import MatchDecision, MatchResult, ReasonCode, Candidate, build_matcher
 from attendance.normalizer import normalize_attendance_mark
 from attendance.ocr import OcrRow, build_provider
+from attendance.photos import merge_photo_rows
 from attendance.preprocess import prepare
 from attendance.review_queue import ReviewQueue
 from attendance.session_resolver import SheetSession, resolve
@@ -53,6 +57,7 @@ def run(
 ) -> RunSummary:
     """Execute the full attendance pipeline for a single image."""
     cfg = load_config(config_path)
+    health_mod.configure(cfg)
     att_cfg = cfg.get("attendance", {})
     ocr_cfg = att_cfg.get("ocr", {})
     preprocess_cfg = ocr_cfg.get("preprocess", {})
@@ -108,24 +113,13 @@ def run(
             session_info = None
             roster_names = None
 
-    log.info("ocr_pass_1")
     try:
-        rows_pass1 = provider.read(image_bytes, roster=roster_names)
+        ocr_rows = _read_sheet(image_bytes=image_bytes, provider=provider, roster_names=roster_names,
+                               ocr_cfg=ocr_cfg, min_conf=min_conf, upload_id=upload_id, dry_run=dry_run)
     except Exception as exc:
         log.error("ocr_api_error", extra={"error": str(exc), "upload_id": upload_id})
         summary.errors.append(f"API_ERROR: OCR pass 1 failed: {exc}")
         return summary
-
-    rows_pass2 = []
-    n_passes = int(ocr_cfg.get("passes", 2))
-    if n_passes >= 2:
-        log.info("ocr_pass_2")
-        try:
-            rows_pass2 = provider.read(image_bytes, roster=roster_names)
-        except Exception as exc:
-            log.warning("ocr_pass2_failed", extra={"error": str(exc)})
-
-    ocr_rows = _merge_passes(rows_pass1, rows_pass2)
 
     return _process_rows(
         ocr_rows=ocr_rows,
@@ -144,6 +138,115 @@ def run(
     )
 
 
+def run_multi(
+    *,
+    image_paths: list[str],
+    course: str,
+    session_num: int,
+    session_type: Optional[str] = None,
+    dry_run: bool = True,
+    force: bool = False,
+    config_path: str = "config/attendance.yaml",
+    review_store_dir: str = "review_queue",
+) -> RunSummary:
+    """Run the pipeline over SEVERAL photos of one attendance sheet as ONE upload.
+
+    Each photo is OCR'd on its own, the rows are merged (duplicates across photos
+    collapsed; conflicting marks sent to review), then everything is matched and
+    written as a single session under one ``upload_id``.
+
+    All-or-nothing on OCR: if any photo cannot be read, nothing is written. A missing
+    photo would make its students look absent.
+    """
+    if not image_paths:
+        raise ValueError("run_multi needs at least one image path")
+    if len(image_paths) == 1:
+        return run(
+            image_path=image_paths[0], course=course, session_num=session_num,
+            session_type=session_type, dry_run=dry_run, force=force,
+            config_path=config_path, review_store_dir=review_store_dir,
+        )
+
+    cfg = load_config(config_path)
+    health_mod.configure(cfg)
+    att_cfg = cfg.get("attendance", {})
+    ocr_cfg = att_cfg.get("ocr", {})
+    preprocess_cfg = ocr_cfg.get("preprocess", {})
+
+    raw_list: list[bytes] = []
+    for path in image_paths:
+        try:
+            raw_list.append(Path(path).read_bytes())
+        except FileNotFoundError:
+            summary = RunSummary(upload_id="error_missing_file", course=course, session=str(session_num), dry_run=dry_run)
+            summary.errors.append(f"Image file not found: {path}")
+            return summary
+        except Exception as e:
+            summary = RunSummary(upload_id="error_reading_file", course=course, session=str(session_num), dry_run=dry_run)
+            summary.errors.append(f"Failed to read image file: {str(e)}")
+            return summary
+
+    upload_id = hashlib.sha256(b"".join(raw_list) + course.encode() + str(session_num).encode()).hexdigest()[:16]
+    log.info("pipeline_multi_start", extra={"upload_id": upload_id, "photos": len(image_paths), "dry_run": dry_run})
+
+    summary = RunSummary(
+        upload_id=upload_id, course=course, session=str(session_num),
+        dry_run=dry_run, photo_count=len(image_paths),
+    )
+
+    provider = build_provider(ocr_cfg)
+    min_conf = float(ocr_cfg.get("min_confidence", 0.75))
+
+    session_info: Optional[SheetSession] = None
+    roster_names: Optional[list[str]] = None
+    if ocr_cfg.get("send_roster_to_provider", False):
+        try:
+            session_info = resolve(course_key=course, session_num=session_num, session_type=session_type, cfg=cfg)
+            roster_names = [name for name, _ in session_info.roster]
+        except Exception as exc:
+            log.warning("early_session_resolve_failed", extra={"error": str(exc), "upload_id": upload_id})
+            session_info = None
+            roster_names = None
+
+    per_photo: list[list[OcrRow]] = []
+    for n, raw_bytes in enumerate(raw_list, start=1):
+        image_bytes = prepare(
+            raw_bytes,
+            orient=preprocess_cfg.get("orient", True),
+            deskew=preprocess_cfg.get("deskew", True),
+            contrast=preprocess_cfg.get("contrast", "mild"),
+            max_side_px=int(preprocess_cfg.get("max_side_px", 2000)),
+            strip_exif=preprocess_cfg.get("strip_exif", True),
+        )
+        log.info("ocr_photo", extra={"upload_id": upload_id, "photo": n, "of": len(raw_list)})
+        try:
+            per_photo.append(_read_sheet(image_bytes=image_bytes, provider=provider, roster_names=roster_names,
+                                         ocr_cfg=ocr_cfg, min_conf=min_conf, upload_id=upload_id, photo=n,
+                                         dry_run=dry_run))
+        except Exception as exc:
+            log.error("ocr_api_error", extra={"error": str(exc), "upload_id": upload_id, "photo": n})
+            summary.errors.append(f"API_ERROR: OCR failed on photo {n} of {len(raw_list)}: {exc}")
+            return summary
+
+    ocr_rows = merge_photo_rows(per_photo, list(image_paths))
+
+    return _process_rows(
+        ocr_rows=ocr_rows,
+        course=course,
+        session_num=session_num,
+        session_type=session_type,
+        dry_run=dry_run,
+        force=force,
+        cfg=cfg,
+        min_conf=min_conf,
+        upload_id=upload_id,
+        image_path=image_paths[0],
+        review_store_dir=review_store_dir,
+        summary=summary,
+        session_info=session_info,
+    )
+
+
 def run_text(
     *,
     names: list[str],
@@ -154,11 +257,21 @@ def run_text(
     force: bool = False,
     config_path: str = "config/attendance.yaml",
     review_store_dir: str = "review_queue",
+    marks: Optional[list[Optional[str]]] = None,
 ) -> RunSummary:
-    """Execute the attendance pipeline using a provided list of names."""
+    """Execute the attendance pipeline using a provided list of names.
+
+    ``marks`` is an optional list parallel to ``names`` (e.g. from
+    ``attendance.marks.split_names_and_marks``). A missing or empty mark means
+    Present, as before. A mark the gates do not recognise goes to review.
+    """
     cfg = load_config(config_path)
-    
-    upload_id = hashlib.sha256(str(names).encode() + course.encode() + str(session_num).encode()).hexdigest()[:16]
+    health_mod.configure(cfg)
+
+    id_basis = str(names)
+    if marks and any((m or "Present") != "Present" for m in marks):
+        id_basis += str(list(marks))   # unchanged for all-Present lists, so old ids stay stable
+    upload_id = hashlib.sha256(id_basis.encode() + course.encode() + str(session_num).encode()).hexdigest()[:16]
     log.info("pipeline_text_start", extra={"upload_id": upload_id, "names_count": len(names), "dry_run": dry_run})
 
     summary = RunSummary(
@@ -168,8 +281,13 @@ def run_text(
         dry_run=dry_run,
     )
 
+    def _mark_for(i: int) -> str:
+        if marks and i < len(marks) and marks[i] and str(marks[i]).strip():
+            return str(marks[i]).strip()
+        return "Present"
+
     ocr_rows = [
-        OcrRow(raw_name=name.strip(), status_mark="Present", confidence=1.0, row_index=i+1)
+        OcrRow(raw_name=name.strip(), status_mark=_mark_for(i), confidence=1.0, row_index=i+1)
         for i, name in enumerate(names) if name.strip()
     ]
 
@@ -236,6 +354,8 @@ def _process_rows(
     review_queue = ReviewQueue(store_dir=review_store_dir)
 
     cells_to_write: list[WriteCell] = []
+    matched_rows: set[int] = set()       # roster rows accepted from this upload
+    candidate_rows: set[int] = set()     # roster rows that flagged items might refer to
     NOISE_WORDS = {"name", "student", "student name", "الاسم", "اسم", "اسم الطالب", "م"}
     MIN_CHARS = 2
 
@@ -255,12 +375,30 @@ def _process_rows(
             ocr_suggested_confidence=ocr_row.confidence,
         )
 
-        if match_result.decision != MatchDecision.AUTO_ACCEPT:
+        if ocr_row.conflict_marks:
+            # Same name on 2+ photos with different marks: never guess, a human decides.
+            _note_candidates(match_result, candidate_rows)
             review_queue.enqueue(
                 upload_id=upload_id,
                 course=course,
                 session=session_num,
-                image_ref=image_path,
+                image_ref=ocr_row.source_image or image_path,
+                ocr_row=ocr_row,
+                match_result=match_result,
+                raw_mark=" / ".join(ocr_row.conflict_marks),
+                session_type=session_type,
+                reason=ReasonCode.PHOTO_MARK_CONFLICT,
+            )
+            summary.flagged += 1
+            continue
+
+        if match_result.decision != MatchDecision.AUTO_ACCEPT:
+            _note_candidates(match_result, candidate_rows)
+            review_queue.enqueue(
+                upload_id=upload_id,
+                course=course,
+                session=session_num,
+                image_ref=ocr_row.source_image or image_path,
                 ocr_row=ocr_row,
                 match_result=match_result,
                 raw_mark=ocr_row.status_mark,
@@ -287,11 +425,12 @@ def _process_rows(
         )
 
         if not gate.passed:
+            _note_candidates(match_result, candidate_rows)
             review_queue.enqueue(
                 upload_id=upload_id,
                 course=course,
                 session=session_num,
-                image_ref=image_path,
+                image_ref=ocr_row.source_image or image_path,
                 ocr_row=ocr_row,
                 match_result=match_result,
                 raw_mark=raw_mark,
@@ -302,6 +441,7 @@ def _process_rows(
             continue
 
         summary.matched += 1
+        matched_rows.add(roster_row)
 
         cells_to_write.append(WriteCell(
             roster_name=match_result.best.roster_name,
@@ -339,6 +479,50 @@ def _process_rows(
     summary.written = len(write_result.written)
     summary.unmatched = max(0, len(ocr_rows) - summary.matched - summary.flagged)
 
+    # Feature 6: Present/Late/Absent counts + comparison with the previous session (counts only).
+    try:
+        hs = history_mod.settings(cfg)
+        if hs["enabled"]:
+            counts = history_mod.count_marks(
+                c.new_value for c in cells_to_write if c.col == session_info.session_col
+            )
+            summary.present_count, summary.late_count, summary.absent_count = (
+                counts["present"], counts["late"], counts["absent"])
+            prev = history_mod.previous(review_store_dir, course, session_num)
+            if prev:
+                summary.prev_counts = dict(prev.get("counts") or {})
+                summary.prev_session = str(prev.get("session", ""))
+                summary.drop_warning = history_mod.drop_warning(counts, prev, hs)
+            if not dry_run and sum(counts.values()) > 0:
+                history_mod.record(review_store_dir, course, session_num, upload_id, counts, summary.flagged)
+    except Exception as exc:   # an optional extra must never fail an upload that already succeeded
+        log.warning("summary_compare_failed", extra={"upload_id": upload_id, "error": str(exc)})
+
+    # "Mark missing students absent?" offer: crash/main only, never changes the sheet here.
+    try:
+        offer, missing_n, held_n = absent_mod.record_pending(
+            cfg=cfg,
+            review_dir=review_store_dir,
+            upload_id=upload_id,
+            course=course,
+            session_num=session_num,
+            session_type=session_type,
+            dry_run=dry_run,
+            roster=session_info.roster,
+            col_data=col_data,
+            matched_rows=matched_rows,
+            candidate_rows=candidate_rows,
+        )
+        summary.absent_offer, summary.missing_count, summary.missing_held_back = offer, missing_n, held_n
+    except Exception as exc:   # an optional extra must never fail an upload that already succeeded
+        log.warning("absent_offer_failed", extra={"upload_id": upload_id, "error": str(exc)})
+
+    if alias_store is not None and not dry_run:
+        try:
+            alias_store.flush_usage()       # Feature 7: remember when learned aliases were last applied
+        except Exception as exc:
+            log.warning("alias_usage_flush_failed", extra={"upload_id": upload_id, "error": str(exc)})
+
     if summary.flagged > 0:
         summary.review_url = str(review_queue._dir / f"{upload_id}.json")
 
@@ -360,12 +544,110 @@ def _process_rows(
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+def _note_candidates(match_result: MatchResult, candidate_rows: set[int]) -> None:
+    """Remember roster rows a flagged item might refer to (so they are not called 'missing')."""
+    if match_result.best is not None and match_result.best.roster_row > 0:
+        candidate_rows.add(match_result.best.roster_row)
+    for cand in match_result.top3:
+        if cand.roster_row > 0:
+            candidate_rows.add(cand.roster_row)
+
+
 def _col_idx(col_letter: str) -> int:
     """Column letter → 1-based index."""
     result = 0
     for ch in col_letter.upper():
         result = result * 26 + (ord(ch) - ord("A") + 1)
     return result
+
+
+def _second_pass_settings(ocr_cfg: dict) -> dict:
+    """Effective ``attendance.ocr.second_pass`` settings. Unknown/missing -> today's behaviour (full)."""
+    sp = (ocr_cfg or {}).get("second_pass") or {}
+    if not isinstance(sp, dict):
+        sp = {}
+    mode = str(sp.get("mode", "full")).strip().lower()
+    return {
+        "mode": mode if mode in ("full", "low_confidence") else "full",
+        "model": sp.get("model") or None,          # different Gemini model for the extra read
+        "provider": sp.get("provider") or None,    # or a different provider (gemini | mock)
+        "include_unmatched": bool(sp.get("include_unmatched", True)),
+    }
+
+
+def _needs_second_look(row, min_conf: float, roster_aware: bool, include_unmatched: bool) -> bool:
+    """Row is worth a second read: confidence below min_confidence, or (roster-aware OCR) no roster match."""
+    conf = getattr(row, "confidence", None)
+    if isinstance(conf, (int, float)) and conf < min_conf:
+        return True
+    if roster_aware and include_unmatched and not getattr(row, "matched_roster_name", None):
+        return True
+    return False
+
+
+def _read_sheet(*, dry_run: bool = False, **kwargs) -> list[OcrRow]:
+    """OCR one sheet. Dry runs record no health events (see attendance/health.py)."""
+    with health_mod.dry_run_scope(dry_run):
+        return _read_sheet_inner(**kwargs)
+
+
+def _read_sheet_inner(
+    *,
+    image_bytes: bytes,
+    provider,
+    roster_names: Optional[list[str]],
+    ocr_cfg: dict,
+    min_conf: float,
+    upload_id: str,
+    photo: Optional[int] = None,
+) -> list[OcrRow]:
+    """OCR one sheet image (shared by run() and run_multi()).
+
+    ``passes: 1``                      -> one read.
+    ``passes: 2`` + ``mode: full``     -> every row read twice and merged (today's behaviour, the default).
+    ``passes: 2`` + ``mode: low_confidence`` -> pass 1 on everything; a second read ONLY when some rows are
+        low-confidence / unmatched, merged into just those rows (optionally with another model/provider).
+    Pass-1 failure raises (caller reports it); a failed pass 2 is logged and pass 1 is used as-is.
+    Retries and the 429 model fallback live inside ``provider.read`` (ocr.py / _net.py).
+    """
+    extra = {"upload_id": upload_id} if photo is None else {"upload_id": upload_id, "photo": photo}
+    log.info("ocr_pass_1", extra=extra)
+    rows1 = provider.read(image_bytes, roster=roster_names)
+
+    if int(ocr_cfg.get("passes", 2)) < 2:
+        return rows1
+    sp = _second_pass_settings(ocr_cfg)
+
+    if sp["mode"] == "full":
+        rows2: list[OcrRow] = []
+        log.info("ocr_pass_2", extra=extra)
+        try:
+            rows2 = provider.read(image_bytes, roster=roster_names)
+        except Exception as exc:
+            log.warning("ocr_pass2_failed", extra={**extra, "error": str(exc)})
+        return _merge_passes(rows1, rows2)
+
+    # mode == "low_confidence"
+    roster_aware = roster_names is not None
+    flagged = [_needs_second_look(r, min_conf, roster_aware, sp["include_unmatched"]) for r in rows1]
+    if not any(flagged):
+        log.info("ocr_pass_2_skipped", extra={**extra, "rows": len(rows1)})
+        return rows1
+    log.info("ocr_pass_2_targeted", extra={**extra, "rows": len(rows1), "rechecked": sum(flagged)})
+    try:
+        second = provider
+        if sp["model"] or sp["provider"]:
+            second_cfg = dict(ocr_cfg)
+            if sp["model"]:
+                second_cfg["model"] = sp["model"]
+            if sp["provider"]:
+                second_cfg["provider"] = sp["provider"]
+            second = build_provider(second_cfg)
+        rows2 = second.read(image_bytes, roster=roster_names)
+    except Exception as exc:
+        log.warning("ocr_pass2_failed", extra={**extra, "error": str(exc)})
+        return rows1
+    return [_merge_passes([r], rows2)[0] if hit else r for r, hit in zip(rows1, flagged)]
 
 
 def _merge_passes(pass1: list[OcrRow], pass2: list[OcrRow]) -> list[OcrRow]:

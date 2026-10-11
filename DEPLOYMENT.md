@@ -334,3 +334,31 @@ To revert:
 3. Or use the API: `python -m attendance.cli review resolve ... --value <old_value> --force`
 
 There is no automatic rollback command. Add one if needed for production.
+
+## Release notes: Phase 1–2
+- No new environment variables and no new dependencies.
+- New optional settings live in `config/attendance.yaml` (`attendance.ingest.names_preview`, `attendance.ingest.multi_photo.*`, `attendance.absent_button.*`); every one has a safe default, see `CHANGELOG.md`.
+- The bot creates `review_queue/_absent/` (small JSON files, row numbers only). It is safe to delete old files there.
+- `review_images/` is no longer tracked by git and is git-ignored. It holds photos of student sheets: keep it out of any public repo.
+
+## Release notes: Phase 3
+- One new OPTIONAL environment variable: `ADMIN_TELEGRAM_IDS` (comma-separated Telegram user IDs allowed to use `/aliases`). Without it the command replies "unavailable". No new dependencies.
+- New small data files next to the old ones in `config/`: `learned_aliases.meta.json` (alias dates) and `variant_suggestions.json` (pending name-variant suggestions). Both are git-ignored like `learned_aliases.json`; back them up together. The bot also creates `review_queue/_history/` (counts only).
+- Approving a name variant (`python -m attendance.cli aliases variants review`) edits `config/name_variants.yaml` (backup `.bak`). RESTART the bot afterwards: that file is read once at start-up.
+- `aliases remove` keeps `config/learned_aliases.json.bak` for one undo.
+- To save Gemini calls, set `attendance.ocr.second_pass.mode: low_confidence` (default `full` = unchanged behaviour).
+
+## Release notes: Phase 4 (operations and security)
+- **New optional env var:** `TEACHER_TELEGRAM_IDS` (comma-separated Telegram user IDs). `ADMIN_TELEGRAM_IDS` now controls review, `/report`, `/streaks`, `/pending`, `/aliases` and `/health`. Teachers (and admins) can upload, paste names, tap "Mark N absent?" and undo with `/revert`. Both can also be set in `config/attendance.yaml` (`attendance.teacher.telegram_ids`, `attendance.admin.telegram_ids`). **Restart the bot after any change.**
+- **How to find a Telegram ID:** the person messages the bot; an unauthorised user is told their own ID in the refusal message. (Or they message the free "@userinfobot" in Telegram.) Send that number to an admin.
+- **New dependency:** `pip install -r requirements.txt` again (now `python-telegram-bot[job-queue]`, which adds APScheduler). Without it the bot still runs; reminders and the review-age alert just cannot run (a warning is logged and `/health` says so).
+- **Old behaviour kept:** if you configure NO teacher and NO admin, everybody can still use the bot (a warning is logged at start). `/aliases` and `/health` stay closed until an admin exists. If you configure only teachers, nobody can review: add at least one admin.
+
+### Go-live checklist: roles, reminders, alerts
+1. Put your own Telegram ID in `ADMIN_TELEGRAM_IDS`, each teacher in `TEACHER_TELEGRAM_IDS`. Restart. Check the log has no "No bot allow-list" warning.
+2. From a non-listed account, message the bot: it must refuse and show that account's ID. From a teacher account: `/start` works, `/report` and `/pending` are refused. From your admin account: `/health` replies.
+3. Run `pip install -r requirements.txt`, restart, and confirm `/health` shows "Reminders: off" (or "on").
+4. Reminders (optional): in `config/attendance.yaml` set `attendance.reminders.enabled: true`, fill `schedule` per course (weekday + class end time), choose `recipients` (default `both`), restart. Reminders only count REAL uploads (dry runs are not recorded, so a dry-run-only setup keeps reminding).
+5. Alerts: default thresholds are on. Alerts go only to admins. Lower `gemini_threshold` / `sheets_threshold` if you want earlier warnings.
+6. If the original zip with `.env`, the service-account key or the SSH keys was ever shared or committed, rotate those secrets now.
+

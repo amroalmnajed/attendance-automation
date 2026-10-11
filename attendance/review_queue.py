@@ -27,6 +27,12 @@ CAIRO = pytz.timezone("Africa/Cairo")
 # ─── Data ─────────────────────────────────────────────────────────────────────
 
 
+def _photo_index(ocr_row) -> Optional[int]:
+    """1-based photo number for multi-photo uploads; None for single-photo uploads."""
+    value = getattr(ocr_row, "photo_index", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _now_iso() -> str:
     return datetime.now(CAIRO).isoformat()
 
@@ -99,6 +105,7 @@ class ReviewQueue:
             "course": course,
             "session": session,
             "paper_row_index": ocr_row.row_index,
+            "photo_index": _photo_index(ocr_row),
             "raw_name": ocr_row.raw_name,
             "raw_mark": raw_mark,
             "session_type": session_type,

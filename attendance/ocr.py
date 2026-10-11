@@ -19,6 +19,7 @@ from typing import Optional
 
 from PIL import Image
 
+from attendance import health
 from attendance._net import http_status, is_transient, retry_call
 from core.logger import get_logger
 
@@ -41,6 +42,9 @@ class OcrRow:
     matched_roster_name: Optional[str] = None  # Model's own best guess at the roster match,
                                                 # when the roster was given to it (see `roster=`).
                                                 # None when roster-aware mode is off/unavailable.
+    source_image: Optional[str] = None          # Which photo this row came from (multi-photo uploads).
+    photo_index: Optional[int] = None           # 1-based photo number within the upload.
+    conflict_marks: Optional[list[str]] = None  # Set when the same name had different marks on 2+ photos.
 
 
 # ─── Abstract interface ───────────────────────────────────────────────────────
@@ -208,6 +212,7 @@ class GeminiProvider(OcrProvider):
 
         response = None
         last_error: Optional[BaseException] = None
+        health_seen: set = set()   # at most one health event per kind per read
 
         def _call(model_name: str):
             return client.models.generate_content(
@@ -235,6 +240,7 @@ class GeminiProvider(OcrProvider):
                 )
             except Exception as exc:
                 last_error = exc
+                health.record_exc(health_seen, exc)
                 if is_transient(exc) or http_status(exc) in (404,):
                     log.warning(
                         "gemini_model_fallback",

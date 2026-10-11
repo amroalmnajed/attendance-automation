@@ -15,6 +15,7 @@ from typing import Optional
 
 import gspread
 
+from attendance import health
 from attendance._net import retry_call
 from attendance.session_resolver import SheetSession
 from core.logger import audit_write, get_logger
@@ -103,7 +104,11 @@ def batch_write(
         jitter=bool(retry.get("jitter", True)),
         context={"upload_id": upload_id, "course": session.course, "tab": session.tab},
     )
-    ws = _with_backoff(session.get_worksheet, op="sheets_open_worksheet", **backoff_kw)
+    try:
+        ws = _with_backoff(session.get_worksheet, op="sheets_open_worksheet", **backoff_kw)
+    except Exception:
+        health.record("sheets_write_error")
+        raise
     updates: list[dict] = []
 
     for cell in cells:
@@ -121,7 +126,11 @@ def batch_write(
             ws.batch_update(updates, value_input_option="USER_ENTERED")
 
         # Same payload re-sent on retry is idempotent (absolute cell values).
-        _with_backoff(_do_update, op="sheets_batch_update", **backoff_kw)
+        try:
+            _with_backoff(_do_update, op="sheets_batch_update", **backoff_kw)
+        except Exception:
+            health.record("sheets_write_error")
+            raise
 
     # Also write the type cell if this is a typed_pair session
     # (Handled by the caller via a separate WriteCell in the cells list)

@@ -224,9 +224,11 @@ def test_names_pipeline_exception_gives_friendly_message(monkeypatch, _env, exc)
 def test_names_config_failure_ends_conversation(monkeypatch, _env):
     monkeypatch.setattr(ingest, "_load_cfg", _boom(OSError(SECRET)))
     bot = FakeBot()
-    result, _ = _done(_names_ctx(bot))
+    result, upd = _done(_names_ctx(bot))
     assert result == ingest.ConversationHandler.END
-    assert any(t.startswith("❌") for t in bot.sent)
+    # Phase 4: the role check runs first and fails safe -> friendly refusal (never access, never the secret)
+    assert upd.replies and upd.replies[-1].startswith("❌")
+    assert SECRET not in " ".join(upd.replies)
 
 
 def test_names_stale_state_asks_to_restart():
