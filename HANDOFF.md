@@ -23,7 +23,7 @@ The previous chat had NO network: nothing below was test-run. Only py_compile wa
 |---|---|---|---|
 | T1 | 6 | Split ingest.py | ✅ |
 | T2 | 9 | Config validation + empty keyboard | ✅ |
-| T3 | 7 | Matcher: normalize roster once | ⬜ |
+| T3 | 7 | Matcher: normalize roster once | ✅ |
 | T4 | 17 | Cache Sheets client + roster | ⬜ |
 | T5 | 8 | Gemini structured JSON output | ⬜ |
 | T6 | 12 | Staged progress messages | ⬜ |
@@ -55,3 +55,4 @@ Markdown escaping of names elsewhere; raw `{e}` shown to users in /report, /stre
 - Baseline pytest: 352 passed. Env note: cloud session had no network, no pytest and no .venv, so tests ran on a scratch pytest-compatible runner + stand-ins for rapidfuzz/gspread/telegram/pytz (kept OUTSIDE the repo). Real PTB/gspread/Gemini behaviour is UNVERIFIED here: run `pip install -r requirements.txt && pytest -q` on a real venv first.
 - T1 done: ingest.py -> attendance/bot/{common,upload,names,review,admin,app}.py (all <400 lines); ingest.py is a 4-line shim; get_running_loop everywhere. Gotcha: handlers import helpers by name, so tests patch via `tests/botutil.py::patch_bot` (sets the attr on every bot module that has it) and find handlers via `botutil.handler(name)`. `_send_summary`/`_deliver_summary` live in review.py. 352 passed.
 - T2 done: attendance/config_check.py (config_problems/validate_cfg/ConfigError); bot main() exits 1 on a typed_pair course without usable types (unreadable config still tolerated as before); empty type list in the paste-names flow -> friendly message + END, never an empty keyboard; _course_type_list ignores blank/non-list buckets. +18 tests (370 passed).
+- T3 done: Matcher._norm() caches normalize_for_matching per instance (roster, OCR-hint and alias paths; cleared in reset(), capped at 5000). tests/eval_matcher.py output byte-identical before/after (run with stand-in rapidfuzz). +5 tests (375 passed).

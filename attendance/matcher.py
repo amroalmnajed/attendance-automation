@@ -97,10 +97,23 @@ class Matcher:
 
         # Set of roster rows already claimed in this upload (prevents collisions)
         self._claimed: set[int] = set()
+        # name -> normalize_for_matching(name). Normalisation is pure per name, so each roster
+        # entry is normalised once per matcher instead of once per query.
+        self._norm_cache: dict[str, str] = {}
 
     def reset(self) -> None:
-        """Reset collision tracker between uploads."""
+        """Reset collision tracker (and the normalisation cache) between uploads."""
         self._claimed = set()
+        self._norm_cache = {}
+
+    def _norm(self, name: str) -> str:
+        """Cached ``normalize_for_matching`` for roster names and OCR hints."""
+        hit = self._norm_cache.get(name)
+        if hit is None:
+            if len(self._norm_cache) >= 5000:      # bounded: a roster is a few hundred names
+                self._norm_cache.clear()
+            hit = self._norm_cache[name] = normalize_for_matching(name)
+        return hit
 
     def score_pair(self, query: str, candidate: str) -> float:
         """Composite score: 0.5 * token_sort_ratio + 0.5 * token_set_ratio."""
@@ -148,7 +161,7 @@ class Matcher:
 
         scored: list[Candidate] = []
         for roster_name, sheet_row in roster:
-            norm_roster = normalize_for_matching(roster_name)
+            norm_roster = self._norm(roster_name)
             s = self.score_pair(query, norm_roster)
             scored.append(Candidate(roster_name=roster_name, roster_row=sheet_row, score=s))
 
@@ -160,13 +173,13 @@ class Matcher:
         # it single-handedly force an accept: it only nudges the score used by the
         # same margin/collision/review-floor gates below, it doesn't bypass them.
         if ocr_suggested_name and scored:
-            target = normalize_for_matching(ocr_suggested_name)
-            suggested = next((c for c in scored if normalize_for_matching(c.roster_name) == target), None)
+            target = self._norm(ocr_suggested_name)
+            suggested = next((c for c in scored if self._norm(c.roster_name) == target), None)
             if suggested is None:
                 # Model may not have copied the roster string verbatim — resolve it
                 # to the closest actual roster entry rather than discarding the hint.
-                resolved = max(scored, key=lambda c: self.score_pair(target, normalize_for_matching(c.roster_name)))
-                if self.score_pair(target, normalize_for_matching(resolved.roster_name)) >= 90.0:
+                resolved = max(scored, key=lambda c: self.score_pair(target, self._norm(c.roster_name)))
+                if self.score_pair(target, self._norm(resolved.roster_name)) >= 90.0:
                     suggested = resolved
             if suggested is not None:
                 boost = 10.0 + 10.0 * max(0.0, min(1.0, ocr_suggested_confidence))  # +10..+20
@@ -242,8 +255,8 @@ class Matcher:
         learned = self.alias_lookup(raw_name)
         if not learned:
             return None
-        target = normalize_for_matching(learned)
-        hit = next(((n, r) for n, r in roster if normalize_for_matching(n) == target), None)
+        target = self._norm(learned)
+        hit = next(((n, r) for n, r in roster if self._norm(n) == target), None)
         if hit is None:
             return None  # student no longer on roster
         cand = Candidate(roster_name=hit[0], roster_row=hit[1], score=100.0)
