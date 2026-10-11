@@ -17,7 +17,7 @@ import gspread
 
 from attendance import health
 from attendance._net import retry_call
-from attendance.session_resolver import SheetSession
+from attendance.session_resolver import SheetSession, invalidate as invalidate_session_cache
 from core.logger import audit_write, get_logger
 
 log = get_logger("writer")
@@ -131,6 +131,7 @@ def batch_write(
         except Exception:
             health.record("sheets_write_error")
             raise
+        invalidate_session_cache()      # the sheet changed: cached rosters/columns are stale
 
     # Also write the type cell if this is a typed_pair session
     # (Handled by the caller via a separate WriteCell in the cells list)

@@ -10,19 +10,70 @@ Validates config against live sheet structure; raises CONFIG_SHEET_DRIFT on mism
 """
 from __future__ import annotations
 
+import copy
 import re
 import os
+import threading
+import time
 from typing import Optional
 
 import gspread
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from google.oauth2.credentials import Credentials
 
+from attendance import _net
 from attendance._net import retry_call
 from core.auth import get_credentials
 from core.logger import get_logger
 
 log = get_logger("session_resolver")
+
+# ── Caches ────────────────────────────────────────────────────────────────────
+# One authorised Sheets client per process (dropped on 401/403) and a short-lived cache of
+# resolved sessions, so back-to-back uploads and search taps don't re-read the whole sheet.
+ROSTER_CACHE_TTL_S = 60.0
+_lock = threading.Lock()
+_client = None
+_session_cache: dict[tuple, tuple[float, "SheetSession"]] = {}
+_now = time.monotonic          # patched in tests
+
+
+def invalidate(*, client: bool = False) -> None:
+    """Drop cached sessions (call after a successful write). ``client=True`` also drops the client."""
+    global _client
+    with _lock:
+        _session_cache.clear()
+        if client:
+            _client = None
+
+
+def _get_client(retry_kw: dict):
+    """The process-wide authorised gspread client (created on first use)."""
+    global _client
+    with _lock:
+        if _client is not None:
+            return _client
+    creds = retry_call(get_credentials, op="gcp_credentials", **retry_kw)
+    gc = gspread.authorize(creds)
+    with _lock:
+        _client = gc
+    return gc
+
+
+def _drop_on_auth_error(exc: BaseException) -> None:
+    """A 401/403 may mean the cached client's token went bad: forget it so the next call re-authorises."""
+    if _net.http_status(exc) in (401, 403):
+        log.warning("sheets_client_reset", extra={"status": _net.http_status(exc)})
+        invalidate(client=True)
+
+
+def _copy_session(s: "SheetSession") -> "SheetSession":
+    """Callers may mutate what they get; never hand out the cached object itself."""
+    c = copy.copy(s)
+    c.roster = list(s.roster)
+    c.allowed_attendance = list(s.allowed_attendance)
+    c.allowed_types = list(s.allowed_types) if s.allowed_types is not None else None
+    return c
 
 
 class ConfigSheetDrift(Exception):
@@ -115,6 +166,29 @@ def resolve(
         SheetSession with everything needed to write attendance.
     """
     course_cfg = cfg["attendance"]["courses"][course_key]
+    key = (os.environ[course_cfg["sheet_id_env"]], course_cfg["tab"], course_key, session_num, session_type)
+    with _lock:
+        hit = _session_cache.get(key)
+        if hit is not None and _now() - hit[0] < ROSTER_CACHE_TTL_S:
+            return _copy_session(hit[1])
+    try:
+        session = _resolve_uncached(course_key, session_num, session_type, cfg)
+    except Exception as exc:
+        _drop_on_auth_error(exc)
+        raise
+    with _lock:
+        _session_cache[key] = (_now(), session)
+    return _copy_session(session)
+
+
+def _resolve_uncached(
+    course_key: str,
+    session_num: int,
+    session_type: Optional[str],
+    cfg: dict,
+) -> SheetSession:
+    """Read the live sheet (client cached, session not). See ``resolve`` for the cached entry point."""
+    course_cfg = cfg["attendance"]["courses"][course_key]
     sheet_id_env = course_cfg["sheet_id_env"]
     sheet_id = os.environ[sheet_id_env]
     tab = course_cfg["tab"]
@@ -128,8 +202,7 @@ def resolve(
     # ── Connect ───────────────────────────────────────────────────────────────
     retry_kw = {k: v for k, v in cfg["attendance"].get("write", {}).get("retry", {}).items()
                 if k in ("max_attempts", "base_s", "cap_s", "jitter")}
-    creds = retry_call(get_credentials, op="gcp_credentials", **retry_kw)
-    gc = gspread.authorize(creds)
+    gc = _get_client(retry_kw)
     ws = _open_worksheet(gc, sheet_id, tab, retry_kw)
 
     log.info("sheet_connected", extra={"course": course_key, "tab": tab, "sheet_id": sheet_id})

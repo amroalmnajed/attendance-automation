@@ -60,3 +60,14 @@ def _reset_health():
         yield
     finally:
         health.reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_resolver_cache():
+    """The resolver caches its Sheets client and resolved sessions process-wide (T4)."""
+    from attendance import session_resolver
+    session_resolver.invalidate(client=True)
+    try:
+        yield
+    finally:
+        session_resolver.invalidate(client=True)
