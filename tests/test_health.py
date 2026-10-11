@@ -6,9 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from attendance import health, ingest, ocr, pipeline, writer
+from attendance import health, ocr, pipeline, writer
 from attendance.writer import WriteCell, batch_write
 from core import notifier
+from attendance.bot import admin
+from tests.botutil import patch_bot
 
 T0 = 1_800_000_000.0           # an arbitrary fixed "now" (epoch seconds)
 
@@ -286,7 +288,7 @@ def test_status_text_says_when_reminders_cannot_run(cfg):
 
 
 def _call_health(monkeypatch, cfg, uid):
-    monkeypatch.setattr(ingest, "_load_cfg", lambda *a, **k: cfg)
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: cfg)
     replies = []
 
     async def reply(text, **_k):
@@ -294,7 +296,7 @@ def _call_health(monkeypatch, cfg, uid):
     upd = SimpleNamespace(effective_user=SimpleNamespace(id=uid), message=SimpleNamespace(reply_text=reply),
                           callback_query=None)
     ctx = SimpleNamespace(args=[], application=SimpleNamespace(job_queue=None))   # works without the scheduler
-    asyncio.run(ingest.cmd_health(upd, ctx))
+    asyncio.run(admin.cmd_health(upd, ctx))
     return replies[0]
 
 

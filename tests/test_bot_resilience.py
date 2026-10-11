@@ -6,8 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from attendance.bot import app, common, names, upload
+from tests.botutil import patch_bot
 
-from attendance import ingest
 
 SECRET = "secret-internal-detail /srv/creds.json"
 
@@ -83,9 +84,9 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)  # review_images/ is created relative to cwd
     cfg = {"core": {"app": {"dry_run_default": True}},
            "attendance": {"review": {"local_dir": "rq"}}}
-    monkeypatch.setattr(ingest, "_load_cfg", lambda *a, **k: cfg)
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: cfg)
     log = MagicMock()
-    monkeypatch.setattr(ingest, "log", log)
+    patch_bot(monkeypatch, "log", log)
     return log
 
 
@@ -96,7 +97,7 @@ def _boom(exc):
 
 
 def _run_photo(bot, ctx):
-    asyncio.run(ingest._run_pipeline_flow(_update(), ctx, 42))
+    asyncio.run(upload._run_pipeline_flow(_update(), ctx, 42))
 
 
 # ─── _user_error_message ──────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ def _run_photo(bot, ctx):
     (ValueError(SECRET), "went wrong"),
 ])
 def test_user_error_message_is_friendly_and_leaks_nothing(exc, needle):
-    msg = ingest._user_error_message(exc)
+    msg = common._user_error_message(exc)
     assert needle in msg.lower()
     assert "secret-internal-detail" not in msg and "Traceback" not in msg
 
@@ -122,7 +123,7 @@ def test_user_error_message_is_friendly_and_leaks_nothing(exc, needle):
     RuntimeError(SECRET), TimeoutError("timed out"), ConnectionError("down"),
 ])
 def test_photo_pipeline_exception_gives_friendly_message(monkeypatch, tmp_path, _env, exc):
-    monkeypatch.setattr(ingest, "run", _boom(exc))
+    patch_bot(monkeypatch, "run", _boom(exc))
     bot = FakeBot()
     ctx = _photo_ctx(bot, tmp_path)
     _run_photo(bot, ctx)
@@ -134,7 +135,7 @@ def test_photo_pipeline_exception_gives_friendly_message(monkeypatch, tmp_path, 
 
 def test_photo_config_load_failure_is_reported_not_swallowed(monkeypatch, tmp_path, _env):
     """Previously _load_cfg ran outside the try → silent task death, stuck 'Processing…'."""
-    monkeypatch.setattr(ingest, "_load_cfg", _boom(FileNotFoundError(SECRET)))
+    patch_bot(monkeypatch, "_load_cfg", _boom(FileNotFoundError(SECRET)))
     bot = FakeBot()
     _run_photo(bot, _photo_ctx(bot, tmp_path))
     assert any(t.startswith("❌") for t in bot.all_text)
@@ -150,7 +151,7 @@ def test_photo_image_copy_failure_is_reported(monkeypatch, tmp_path):
 
 
 def test_photo_falls_back_to_new_message_if_edit_fails(monkeypatch, tmp_path):
-    monkeypatch.setattr(ingest, "run", _boom(RuntimeError(SECRET)))
+    patch_bot(monkeypatch, "run", _boom(RuntimeError(SECRET)))
     bot = FakeBot(fail_edit=True)
     _run_photo(bot, _photo_ctx(bot, tmp_path))
     assert any(t.startswith("❌") for t in bot.sent)
@@ -163,8 +164,8 @@ def test_photo_stale_state_asks_to_restart(tmp_path):
 
 
 def test_photo_timeout_does_not_hang(monkeypatch, tmp_path):
-    monkeypatch.setattr(ingest, "PIPELINE_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(ingest, "run", lambda *a, **k: time.sleep(0.3))
+    patch_bot(monkeypatch, "PIPELINE_TIMEOUT_S", 0.05)
+    patch_bot(monkeypatch, "run", lambda *a, **k: time.sleep(0.3))
     bot = FakeBot()
     start = time.monotonic()
     _run_photo(bot, _photo_ctx(bot, tmp_path))
@@ -174,12 +175,12 @@ def test_photo_timeout_does_not_hang(monkeypatch, tmp_path):
 
 def test_photo_summary_delivery_failure_is_not_reported_as_processing_error(monkeypatch, tmp_path):
     summary = SimpleNamespace(upload_id="abc123", flagged=0, sheet_url=None)
-    monkeypatch.setattr(ingest, "run", lambda *a, **k: summary)
+    patch_bot(monkeypatch, "run", lambda *a, **k: summary)
 
     async def bad_send(*a, **k):
         raise RuntimeError("telegram down")
 
-    monkeypatch.setattr(ingest, "_send_summary", bad_send)
+    patch_bot(monkeypatch, "_send_summary", bad_send)
     bot = FakeBot()
     _run_photo(bot, _photo_ctx(bot, tmp_path))
     text = " ".join(bot.all_text)
@@ -188,13 +189,13 @@ def test_photo_summary_delivery_failure_is_not_reported_as_processing_error(monk
 
 def test_photo_success_path_unchanged(monkeypatch, tmp_path):
     summary = SimpleNamespace(upload_id="u1", flagged=0, sheet_url=None)
-    monkeypatch.setattr(ingest, "run", lambda *a, **k: summary)
+    patch_bot(monkeypatch, "run", lambda *a, **k: summary)
     sent = []
 
     async def ok_send(chat_id, bot, s, review_dir):
         sent.append(s)
 
-    monkeypatch.setattr(ingest, "_send_summary", ok_send)
+    patch_bot(monkeypatch, "_send_summary", ok_send)
     bot = FakeBot()
     _run_photo(bot, _photo_ctx(bot, tmp_path))
     assert sent == [summary] and bot.status.deleted
@@ -204,17 +205,17 @@ def test_photo_success_path_unchanged(monkeypatch, tmp_path):
 
 def _done(ctx):
     upd = _update()
-    result = asyncio.run(ingest.handle_names_done(upd, ctx))
+    result = asyncio.run(names.handle_names_done(upd, ctx))
     return result, upd
 
 
 @pytest.mark.parametrize("exc", [RuntimeError(SECRET), TimeoutError("t/o")])
 def test_names_pipeline_exception_gives_friendly_message(monkeypatch, _env, exc):
-    monkeypatch.setattr(ingest, "run_text", _boom(exc))
+    patch_bot(monkeypatch, "run_text", _boom(exc))
     bot = FakeBot()
     ctx = _names_ctx(bot)
     result, _ = _done(ctx)
-    assert result == ingest.ConversationHandler.END
+    assert result == common.ConversationHandler.END
     assert bot.sent and bot.sent[-1].startswith("❌")
     assert "secret-internal-detail" not in " ".join(bot.sent)
     assert _env.error.called
@@ -222,10 +223,10 @@ def test_names_pipeline_exception_gives_friendly_message(monkeypatch, _env, exc)
 
 
 def test_names_config_failure_ends_conversation(monkeypatch, _env):
-    monkeypatch.setattr(ingest, "_load_cfg", _boom(OSError(SECRET)))
+    patch_bot(monkeypatch, "_load_cfg", _boom(OSError(SECRET)))
     bot = FakeBot()
     result, upd = _done(_names_ctx(bot))
-    assert result == ingest.ConversationHandler.END
+    assert result == common.ConversationHandler.END
     # Phase 4: the role check runs first and fails safe -> friendly refusal (never access, never the secret)
     assert upd.replies and upd.replies[-1].startswith("❌")
     assert SECRET not in " ".join(upd.replies)
@@ -235,23 +236,23 @@ def test_names_stale_state_asks_to_restart():
     bot = FakeBot()
     ctx = _ctx(bot, nc_names=["Ali"])  # nc_course / nc_session lost
     result, _ = _done(ctx)
-    assert result == ingest.ConversationHandler.END
+    assert result == common.ConversationHandler.END
     assert any("/start" in t for t in bot.sent)
 
 
 def test_names_timeout_does_not_hang(monkeypatch):
-    monkeypatch.setattr(ingest, "PIPELINE_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(ingest, "run_text", lambda *a, **k: time.sleep(0.3))
+    patch_bot(monkeypatch, "PIPELINE_TIMEOUT_S", 0.05)
+    patch_bot(monkeypatch, "run_text", lambda *a, **k: time.sleep(0.3))
     bot = FakeBot()
     result, _ = _done(_names_ctx(bot))
-    assert result == ingest.ConversationHandler.END
+    assert result == common.ConversationHandler.END
     assert any("too long" in t for t in bot.sent)
 
 
 def test_names_empty_list_keeps_waiting():
     bot = FakeBot()
     result, upd = _done(_ctx(bot, nc_names=[]))
-    assert result == ingest.NAMES_PASTE and upd.replies
+    assert result == common.NAMES_PASTE and upd.replies
 
 
 # ─── Global error handler ─────────────────────────────────────────────────────
@@ -263,18 +264,18 @@ def _err_ctx(bot, exc):
 def test_global_error_handler_logs_and_notifies(_env):
     bot = FakeBot()
     upd = SimpleNamespace(effective_chat=SimpleNamespace(id=7))
-    asyncio.run(ingest._global_error_handler(upd, _err_ctx(bot, RuntimeError(SECRET))))
+    asyncio.run(app._global_error_handler(upd, _err_ctx(bot, RuntimeError(SECRET))))
     assert _env.error.called
     assert bot.sent and "secret-internal-detail" not in bot.sent[0]
 
 
 def test_global_error_handler_without_update_only_logs(_env):
     bot = FakeBot()
-    asyncio.run(ingest._global_error_handler(None, _err_ctx(bot, ConnectionError("poll"))))
+    asyncio.run(app._global_error_handler(None, _err_ctx(bot, ConnectionError("poll"))))
     assert _env.error.called and bot.sent == []
 
 
 def test_global_error_handler_survives_notify_failure(_env):
     bot = FakeBot(fail_send=True)
     upd = SimpleNamespace(effective_chat=SimpleNamespace(id=7))
-    asyncio.run(ingest._global_error_handler(upd, _err_ctx(bot, RuntimeError("x"))))  # must not raise
+    asyncio.run(app._global_error_handler(upd, _err_ctx(bot, RuntimeError("x"))))  # must not raise

@@ -1,0 +1,355 @@
+"""attendance/bot/review.py — summary delivery, review cards, resolution and roster-search handlers."""
+from __future__ import annotations
+
+import asyncio
+import cv2
+import os
+import re
+from pathlib import Path
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes, ConversationHandler
+
+from attendance.aliases import AliasStore
+from attendance.normalizer import canonical_mark
+from attendance.review_queue import ReviewQueue
+from attendance.session_resolver import resolve
+from attendance.writer import WriteCell, batch_write
+
+from attendance.bot.common import SEARCH_ROSTER, _guard, _load_cfg, _notify_failure, log
+
+
+async def _deliver_summary(chat_id: int, bot, summary, review_dir: str) -> None:
+    """Send the summary; a delivery failure must not be reported as a processing failure."""
+    try:
+        await _send_summary(chat_id, bot, summary, review_dir)
+    except Exception:
+        log.error("ingest_summary_delivery_failed",
+                  extra={"chat_id": chat_id, "upload_id": getattr(summary, "upload_id", None)},
+                  exc_info=True)
+        await _notify_failure(
+            bot, chat_id,
+            f"⚠️ Sheet processed (upload ID: {getattr(summary, 'upload_id', 'unknown')}), "
+            "but I couldn't display the summary. Use /pending to check review items.",
+        )
+
+
+# ─── Shared summary sender ────────────────────────────────────────────────────
+
+async def _send_summary(chat_id: int, bot, summary, review_dir: str) -> None:
+    kb = []
+    if summary.sheet_url:
+        kb.append([InlineKeyboardButton("📊 Open Google Sheet", url=summary.sheet_url)])
+    missing_n = getattr(summary, "missing_count", 0)
+    if getattr(summary, "absent_offer", False) and isinstance(missing_n, int) and missing_n > 0:
+        label = f"🙈 Mark {missing_n} absent?" + (" (dry-run)" if getattr(summary, "dry_run", False) else "")
+        kb.append([InlineKeyboardButton(label, callback_data=f"abs|{summary.upload_id}")])
+    kb.append([InlineKeyboardButton("🔄 Undo / Revert", callback_data=f"rev|{summary.upload_id}")])
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=summary.text(),
+        reply_markup=InlineKeyboardMarkup(kb),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    if summary.flagged > 0:
+        await _send_next_review_item(chat_id, bot, summary.upload_id, review_dir)
+
+
+# ─── Image crop helper ────────────────────────────────────────────────────────
+
+def _crop_image(img_path: str, bbox: list[float]) -> str:
+    if not bbox or len(bbox) != 4:
+        return img_path
+    try:
+        img = cv2.imread(img_path)
+        if img is None:
+            return img_path
+        h, w = img.shape[:2]
+        ymin, xmin, ymax, xmax = bbox
+        y1, y2 = max(0, int(ymin * h) - 20), min(h, int(ymax * h) + 20)
+        x1, x2 = max(0, int(xmin * w) - 20), min(w, int(xmax * w) + 20)
+        crop = img[y1:y2, x1:x2]
+        crop_path = re.sub(r"\.(jpe?g|png)$", r"_crop.\1", img_path, flags=re.IGNORECASE)
+        cv2.imwrite(crop_path, crop)
+        return crop_path
+    except Exception:
+        return img_path
+
+
+# ─── Review queue sender ──────────────────────────────────────────────────────
+
+async def _send_next_review_item(chat_id: int, bot, upload_id: str, review_dir: str) -> None:
+    loop = asyncio.get_running_loop()
+
+    def _get_queue_data():
+        q = ReviewQueue(store_dir=review_dir)
+        p = q.list_pending(upload_id)
+        t = len(q._load(upload_id).get("items", []))
+        return p, t
+
+    pending, total = await loop.run_in_executor(None, _get_queue_data)
+
+    if not pending:
+        await bot.send_message(chat_id=chat_id, text="🎉 All review items for this sheet have been resolved!")
+        return
+
+    item = pending[0]
+    current_idx = total - len(pending) + 1
+
+    img_path  = item.get("image_ref", "")
+    bbox      = item.get("bounding_box")
+    crop_path = _crop_image(img_path, bbox) if bbox and os.path.exists(img_path) else img_path
+
+    keyboard = []
+    for match in item.get("top3", []):
+        cb_data  = f"res|{upload_id[:12]}|{item['item_id'][:8]}|{match['roster_row']}"
+        btn_text = f"[{match['score']}%] {match['roster_name']}"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=cb_data)])
+
+    keyboard.append([
+        InlineKeyboardButton("❌ Absent", callback_data=f"res|{upload_id[:12]}|{item['item_id'][:8]}|absent"),
+        InlineKeyboardButton("🔍 Search", callback_data=f"srch|{upload_id[:12]}|{item['item_id'][:8]}"),
+    ])
+    keyboard.append([InlineKeyboardButton("⏭️ Skip / Ignore", callback_data=f"res|{upload_id[:12]}|{item['item_id'][:8]}|0")])
+
+    caption = (
+        f"⚠️ *Review Required ({current_idx} of {total})*\n"
+        f"Paper name: `{item['raw_name']}` (Row {item['paper_row_index']})\n"
+        f"Confidence: {item['ocr_confidence']*100:.0f}%"
+    )
+
+    try:
+        if os.path.exists(crop_path):
+            loop = asyncio.get_running_loop()
+            file_bytes = await loop.run_in_executor(None, lambda: open(crop_path, "rb").read())
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=file_bytes,
+                caption=caption,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        else:
+            raise FileNotFoundError
+    except Exception:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=caption,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+# ─── Resolution callback ──────────────────────────────────────────────────────
+
+@_guard("admin")
+async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("res|"):
+        return
+
+    parts = data.split("|", 3)          # ["res", short_upload_id, item_id, action]
+    if len(parts) != 4:
+        return
+    _, short_upload_id, item_id, action = parts
+
+    cfg        = _load_cfg()
+    review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
+
+    loop = asyncio.get_running_loop()
+
+    def _find_upload():
+        queue    = ReviewQueue(store_dir=review_dir)
+        full_uid = None
+        for p in Path(review_dir).glob(f"{short_upload_id}*.json"):
+            full_uid = p.stem
+            break
+        if not full_uid:
+            return None, None, None
+        return full_uid, queue, queue.list_pending(full_uid)
+
+    full_upload_id, queue, pending = await loop.run_in_executor(None, _find_upload)
+
+    if not full_upload_id:
+        await query.edit_message_caption(caption="❌ Error: Queue file not found or expired.")
+        return
+
+    target_item = next((i for i in pending if i["item_id"].startswith(item_id)), None)
+
+    if not target_item:
+        await query.edit_message_caption(caption="✅ Item already resolved.")
+        return
+
+    course       = target_item["course"]
+    # Blocking Sheets I/O: keep it off the event loop (see HANDOFF.md #16).
+    session_info = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: resolve(course, target_item["session"], target_item.get("session_type"), cfg))
+
+    roster_row       = 0
+    roster_name      = "IGNORED"
+    attendance_value = "Absent"
+
+    if action == "absent":
+        roster_name = "MARKED_ABSENT"
+    elif action == "0":
+        roster_name = "IGNORED"
+    else:
+        try:
+            roster_row = int(action)
+        except ValueError:
+            await query.edit_message_caption(caption="❌ Invalid action.")
+            return
+        roster_name      = next((m["roster_name"] for m in target_item["top3"] if m["roster_row"] == roster_row), "Unknown")
+        attendance_value = canonical_mark(target_item.get("raw_mark"))
+
+    def _do_write():
+        if roster_row > 0:
+            ws = session_info.get_worksheet()
+            cells: list[WriteCell] = [
+                WriteCell(
+                    roster_name=roster_name,
+                    sheet_row=roster_row,
+                    col=session_info.session_col,
+                    old_value=None,
+                    new_value=attendance_value,
+                )
+            ]
+
+            # For typed_pair courses (g9/g10) also write the session-type cell
+            # that sits immediately to the left of the Sx Attendance column.
+            # Previously this was silently omitted, leaving the type column blank
+            # even though the attendance value was written correctly.
+            session_type = target_item.get("session_type")
+            if session_info.type_col and session_type:
+                from attendance.pipeline import _col_idx
+                type_col_data = ws.col_values(_col_idx(session_info.type_col))
+                type_current = type_col_data[roster_row - 1] if roster_row <= len(type_col_data) else ""
+                if not type_current.strip():
+                    cells.append(WriteCell(
+                        roster_name=roster_name,
+                        sheet_row=roster_row,
+                        col=session_info.type_col,
+                        old_value=type_current or None,
+                        new_value=session_type,
+                    ))
+
+            batch_write(
+                session_info,
+                cells,
+                upload_id=full_upload_id,
+                dry_run=cfg["core"]["app"].get("dry_run_default", True),
+                retry_cfg=cfg["attendance"]["write"].get("retry", {}),
+            )
+
+            match_cfg = cfg["attendance"].get("match", {})
+            if match_cfg.get("learn_aliases", True):
+                AliasStore(
+                    path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
+                    min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
+                ).learn(course, target_item["raw_name"], roster_name)
+            if not cfg["core"]["app"].get("dry_run_default", True):
+                from attendance import variants as variants_mod      # Feature 15: suggestion only, no effect on matching
+                variants_mod.record_resolution(cfg, course, target_item["raw_name"], roster_name)
+
+        queue.resolve(
+            full_upload_id,
+            item_id,
+            chosen_roster_row=roster_row,
+            chosen_roster_name=roster_name,
+            attendance_value=attendance_value,
+            resolved_by="telegram",
+        )
+
+    try:
+        await loop.run_in_executor(None, _do_write)
+        await query.message.delete()
+        await _send_next_review_item(query.message.chat_id, context.bot, full_upload_id, review_dir)
+    except Exception as e:
+        try:
+            await query.edit_message_caption(caption=f"❌ Error writing to sheet: {e}")
+        except Exception:
+            await query.edit_message_text(text=f"❌ Error writing to sheet: {e}")
+
+
+# ─── Search flow ──────────────────────────────────────────────────────────────
+
+@_guard("admin", conv=True)
+async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split("|", 2)   # ["srch", short_upload_id, item_id]
+    if len(parts) != 3:
+        return ConversationHandler.END
+
+    _, short_upload_id, item_id = parts
+    context.user_data["search_upload_id"] = short_upload_id
+    context.user_data["search_item_id"]   = item_id
+
+    await query.message.reply_text(
+        "🔍 Type a few letters of the student's name to search the roster:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return SEARCH_ROSTER
+
+
+@_guard("admin", conv=True)
+async def search_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    search_term    = update.message.text.lower()
+    short_upload_id = context.user_data.get("search_upload_id")
+    item_id        = context.user_data.get("search_item_id")
+
+    if not short_upload_id or not item_id:
+        await update.message.reply_text("Search context lost. Please try again.")
+        return ConversationHandler.END
+
+    cfg        = _load_cfg()
+    review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
+
+    loop = asyncio.get_running_loop()
+
+    def _find_upload():
+        queue    = ReviewQueue(store_dir=review_dir)
+        full_uid = None
+        for p in Path(review_dir).glob(f"{short_upload_id}*.json"):
+            full_uid = p.stem
+            break
+        if not full_uid:
+            return None, None, None
+        return full_uid, queue, queue.list_pending(full_uid)
+
+    full_upload_id, queue, pending = await loop.run_in_executor(None, _find_upload)
+
+    if not full_upload_id:
+        await update.message.reply_text("❌ Queue file not found.")
+        return ConversationHandler.END
+
+    target_item = next((i for i in pending if i["item_id"].startswith(item_id)), None)
+    if not target_item:
+        await update.message.reply_text("✅ Item already resolved.")
+        return ConversationHandler.END
+
+    course       = target_item["course"]
+    # Blocking Sheets I/O: keep it off the event loop (see HANDOFF.md #16).
+    session_info = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: resolve(course, target_item["session"], target_item.get("session_type"), cfg))
+
+    matches = [r for r in session_info.roster if search_term in r[0].lower()][:5]
+
+    if not matches:
+        await update.message.reply_text("No students found matching that name. Try again or /cancel.")
+        return SEARCH_ROSTER
+
+    keyboard = []
+    for roster_name, roster_row in matches:
+        cb_data = f"res|{short_upload_id}|{item_id}|{roster_row}"
+        keyboard.append([InlineKeyboardButton(roster_name, callback_data=cb_data)])
+
+    await update.message.reply_text("Found these students:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END

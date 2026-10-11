@@ -8,9 +8,11 @@ from types import SimpleNamespace
 
 import yaml
 
-from attendance import alias_admin, cli, ingest, pipeline, writer
+from attendance import alias_admin, cli, pipeline, writer
 from attendance.aliases import AliasStore
 from tests.test_absent import FakeWS, cfg, fake_session  # noqa: F401  (cfg is a fixture)
+from attendance.bot import admin
+from tests.botutil import patch_bot
 
 TODAY = date(2026, 10, 11)
 
@@ -80,7 +82,7 @@ def test_cli_list_export_remove(tmp_path, capsys):
 # ─── Bot command: admin only, never open to everyone ──────────────────────────
 
 def _call(monkeypatch, cfg, user_id, args, env=None):
-    monkeypatch.setattr(ingest, "_load_cfg", lambda: cfg)
+    patch_bot(monkeypatch, "_load_cfg", lambda: cfg)
     for k in ("ADMIN_TELEGRAM_IDS",):
         monkeypatch.delenv(k, raising=False)
     for k, v in (env or {}).items():
@@ -90,7 +92,7 @@ def _call(monkeypatch, cfg, user_id, args, env=None):
     async def reply(text, **_k):
         replies.append(text)
     upd = SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=SimpleNamespace(reply_text=reply))
-    asyncio.run(ingest.cmd_aliases(upd, SimpleNamespace(args=args)))
+    asyncio.run(admin.cmd_aliases(upd, SimpleNamespace(args=args)))
     return replies[0]
 
 
@@ -114,13 +116,13 @@ def test_admin_ids_from_config_and_env_ignore_junk():
 
 
 def test_bot_command_survives_a_broken_config(monkeypatch):
-    monkeypatch.setattr(ingest, "_load_cfg", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    patch_bot(monkeypatch, "_load_cfg", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     replies = []
 
     async def reply(text, **_k):
         replies.append(text)
     upd = SimpleNamespace(effective_user=SimpleNamespace(id=1), message=SimpleNamespace(reply_text=reply))
-    asyncio.run(ingest.cmd_aliases(upd, SimpleNamespace(args=[])))
+    asyncio.run(admin.cmd_aliases(upd, SimpleNamespace(args=[])))
     assert replies[0].startswith("❌")   # Phase 4: role check fails safe before the command runs
 
 

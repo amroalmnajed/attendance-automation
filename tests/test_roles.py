@@ -4,7 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from attendance import ingest, roles
+from attendance import roles
+from attendance.bot import admin, common, upload
+from attendance.bot import app as bot_app
+from tests.botutil import handler, patch_bot
 
 CFG = {"attendance": {"admin": {"telegram_ids": [1]}, "teacher": {"telegram_ids": [2]}}}
 ADMIN, TEACHER, STRANGER = 1, 2, 999
@@ -38,7 +41,7 @@ def test_role_by_level_table(uid, level, allowed):
 
 def test_every_handler_has_the_agreed_level():
     for lvl, name in ALL:
-        assert getattr(getattr(ingest, name), "required_level", None) == lvl, name
+        assert getattr(handler(name), "required_level", None) == lvl, name
 
 
 def test_ids_merge_env_and_config_and_ignore_junk():
@@ -82,12 +85,12 @@ def _update(uid, callback=False):
 
 @pytest.fixture
 def with_cfg(monkeypatch):
-    monkeypatch.setattr(ingest, "_load_cfg", lambda *a, **k: CFG)
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: CFG)
 
 
 @pytest.mark.parametrize("lvl,name", ALL)
 def test_stranger_is_refused_and_sees_only_own_id(with_cfg, lvl, name):
-    fn = getattr(ingest, name)
+    fn = handler(name)
     is_cb = name.endswith("_callback")
     upd, out = _update(STRANGER, callback=is_cb)
     ctx = SimpleNamespace(bot=SimpleNamespace(), user_data={}, args=[])
@@ -102,7 +105,7 @@ def test_stranger_is_refused_and_sees_only_own_id(with_cfg, lvl, name):
 
 def test_refusal_never_contains_course_or_student_data(with_cfg):
     upd, out = _update(STRANGER)
-    asyncio.run(ingest.cmd_report(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
+    asyncio.run(admin.cmd_report(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
     text = out["replies"][0].lower()
     for word in ("crash", "g10", "g9", "main", "student", "present"):
         assert word not in text.replace("admins only", "")
@@ -110,19 +113,19 @@ def test_refusal_never_contains_course_or_student_data(with_cfg):
 
 def test_teacher_is_refused_on_admin_command_but_not_on_teacher_command(monkeypatch, with_cfg):
     upd, out = _update(TEACHER)
-    asyncio.run(ingest.cmd_report(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
+    asyncio.run(admin.cmd_report(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
     assert "admins only" in out["replies"][0]
     upd, out = _update(TEACHER)
-    asyncio.run(ingest.start_cmd(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
+    asyncio.run(upload.start_cmd(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
     assert not any("🔒" in r for r in out["replies"])         # allowed through to the real handler
 
 
 def test_role_check_error_means_refusal_not_access(monkeypatch):
-    monkeypatch.setattr(ingest, "_load_cfg", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("secret-x")))
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("secret-x")))
     upd, out = _update(ADMIN)
     ran = []
 
-    @roles.guard("teacher", lambda: ingest._load_cfg(), None)
+    @roles.guard("teacher", lambda: common._load_cfg(), None)
     async def handler(u, c):
         ran.append(1)
     asyncio.run(handler(upd, SimpleNamespace(bot=None)))
@@ -148,12 +151,12 @@ def test_refusal_failure_never_crashes_or_grants():
 def test_bot_starts_and_registers_health_without_the_scheduler_package(monkeypatch, tmp_path):
     from telegram.ext import Application, CommandHandler
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:TEST-TOKEN-NOT-REAL")
-    monkeypatch.setattr(ingest, "_load_cfg", lambda *a, **k: {
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: {
         "attendance": {"review": {"local_dir": str(tmp_path / "rq")},
                        "reminders": {"enabled": True}, "admin": {"telegram_ids": [1]}}})
     captured = {}
     monkeypatch.setattr(Application, "run_polling", lambda self, *a, **k: captured.setdefault("app", self))
-    ingest.main()                                   # reminders ON + no job queue must not stop startup
+    bot_app.main()                                   # reminders ON + no job queue must not stop startup
     app = captured["app"]
     cmds = {c for hs in app.handlers.values() for h in hs if isinstance(h, CommandHandler) for c in h.commands}
     assert {"health", "aliases", "report", "revert"} <= cmds
