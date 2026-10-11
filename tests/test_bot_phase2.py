@@ -268,6 +268,7 @@ def test_start_processing_uses_run_multi_for_several_photos(monkeypatch, tmp_pat
     c = ctx(course="crash", session=3, type="Not Set", image_path=imgs[0], image_paths=imgs)
     asyncio.run(upload._run_pipeline_flow(SimpleNamespace(), c, 42))
     assert len(seen["image_paths"]) == 2 and all(p.startswith("review_images") for p in seen["image_paths"])
+    assert callable(seen["progress"])                                           # staged progress messages
     assert not any(__import__("os").path.exists(p) for p in imgs)               # temp photos removed
     assert c.user_data == {}
 
@@ -286,6 +287,7 @@ def test_single_photo_still_uses_run(monkeypatch, tmp_path):
     c = ctx(course="crash", session=3, type="Not Set", image_path=str(img))
     asyncio.run(upload._run_pipeline_flow(SimpleNamespace(), c, 42))
     assert "image_path" in seen
+    assert callable(seen["progress"])
 
 
 # ─── Absent button ────────────────────────────────────────────────────────────

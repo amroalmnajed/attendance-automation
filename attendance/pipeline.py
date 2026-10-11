@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import yaml
 
@@ -29,6 +29,20 @@ from core.logger import get_logger
 from core.notifier import RunSummary
 
 log = get_logger("pipeline")
+
+# Progress stages reported through the optional ``progress`` callback (the bot maps them to text).
+STAGE_READING, STAGE_MATCHING, STAGE_SAVING = "reading", "matching", "saving"
+ProgressFn = Callable[[str], None]
+
+
+def _emit(progress: Optional[ProgressFn], stage: str) -> None:
+    """Report a stage; a broken callback must never break the pipeline."""
+    if progress is None:
+        return
+    try:
+        progress(stage)
+    except Exception:
+        log.warning("progress_callback_failed", extra={"stage": stage})
 
 
 def load_config(path: str = "config/attendance.yaml") -> dict:
@@ -54,6 +68,7 @@ def run(
     force: bool = False,
     config_path: str = "config/attendance.yaml",
     review_store_dir: str = "review_queue",
+    progress: Optional[ProgressFn] = None,
 ) -> RunSummary:
     """Execute the full attendance pipeline for a single image."""
     cfg = load_config(config_path)
@@ -77,6 +92,7 @@ def run(
         return summary
 
     log.info("pipeline_start", extra={"upload_id": upload_id, "image": image_path, "dry_run": dry_run})
+    _emit(progress, STAGE_READING)
 
     summary = RunSummary(
         upload_id=upload_id,
@@ -135,6 +151,7 @@ def run(
         review_store_dir=review_store_dir,
         summary=summary,
         session_info=session_info,
+        progress=progress,
     )
 
 
@@ -148,6 +165,7 @@ def run_multi(
     force: bool = False,
     config_path: str = "config/attendance.yaml",
     review_store_dir: str = "review_queue",
+    progress: Optional[ProgressFn] = None,
 ) -> RunSummary:
     """Run the pipeline over SEVERAL photos of one attendance sheet as ONE upload.
 
@@ -188,6 +206,7 @@ def run_multi(
 
     upload_id = hashlib.sha256(b"".join(raw_list) + course.encode() + str(session_num).encode()).hexdigest()[:16]
     log.info("pipeline_multi_start", extra={"upload_id": upload_id, "photos": len(image_paths), "dry_run": dry_run})
+    _emit(progress, STAGE_READING)
 
     summary = RunSummary(
         upload_id=upload_id, course=course, session=str(session_num),
@@ -244,6 +263,7 @@ def run_multi(
         review_store_dir=review_store_dir,
         summary=summary,
         session_info=session_info,
+        progress=progress,
     )
 
 
@@ -322,6 +342,7 @@ def _process_rows(
     review_store_dir: str,
     summary: RunSummary,
     session_info: Optional[SheetSession] = None,
+    progress: Optional[ProgressFn] = None,
 ) -> RunSummary:
     att_cfg = cfg["attendance"]
     match_cfg = att_cfg["match"]
@@ -359,6 +380,7 @@ def _process_rows(
     NOISE_WORDS = {"name", "student", "student name", "الاسم", "اسم", "اسم الطالب", "م"}
     MIN_CHARS = 2
 
+    _emit(progress, STAGE_MATCHING)
     for ocr_row in ocr_rows:
         raw_stripped = ocr_row.raw_name.strip()
         raw_clean = raw_stripped.lower()
@@ -468,6 +490,7 @@ def _process_rows(
         log.warning("all_marks_null", extra={"upload_id": upload_id})
         summary.errors.append(msg)
 
+    _emit(progress, STAGE_SAVING)
     write_result = batch_write(
         session_info,
         cells_to_write,

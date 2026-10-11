@@ -21,6 +21,7 @@ from attendance.bot.common import (
     NAMES_COURSE,
     PHOTO_FLOW,
     PIPELINE_TIMEOUT_S,
+    STAGE_TEXT,
     _course_keyboard,
     _guard,
     _input_settings,
@@ -30,6 +31,7 @@ from attendance.bot.common import (
     _run_blocking,
     _user_error_message,
     log,
+    make_progress_callback,
 )
 from attendance.bot.review import _deliver_summary
 
@@ -264,8 +266,9 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
         status_msg = await context.bot.send_message(
             chat_id=chat_id,
-            text="⏳ Processing sheet (OpenCV + Gemini OCR + Google Sheets)...",
+            text=STAGE_TEXT["reading"],
         )
+        progress = make_progress_callback(status_msg, asyncio.get_running_loop(), initial="reading")
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         except Exception:
@@ -294,6 +297,7 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     force=False,
                     config_path="config/attendance.yaml",
                     review_store_dir=review_dir,
+                    progress=progress,
                 )
             )
         else:
@@ -308,6 +312,7 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     force=False,
                     config_path="config/attendance.yaml",
                     review_store_dir=review_dir,
+                    progress=progress,
                 ),
                 timeout_s=PIPELINE_TIMEOUT_S * len(persistent_paths),
             )

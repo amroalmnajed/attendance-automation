@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
+import time
 import yaml
 
 from dotenv import load_dotenv
@@ -116,6 +118,54 @@ async def _notify_failure(bot, chat_id: int, text: str, status_msg=None) -> None
         await bot.send_message(chat_id=chat_id, text=text)
     except Exception:
         log.error("ingest_notify_failed", extra={"chat_id": chat_id}, exc_info=True)
+
+
+# Friendly text for each pipeline stage (see attendance.pipeline.STAGE_*).
+STAGE_TEXT = {
+    "reading": "📷 Reading the photo…",
+    "matching": "🔎 Matching names…",
+    "saving": "✍️ Saving to the sheet…",
+}
+PROGRESS_MIN_INTERVAL_S = 2.0
+
+
+async def _edit_status(status_msg, text: str) -> None:
+    try:
+        await status_msg.edit_text(text)
+    except Exception:
+        pass        # cosmetic only (message deleted, "not modified", flood limit, ...)
+
+
+def make_progress_callback(status_msg, loop, *, initial: str | None = None,
+                           min_interval_s: float | None = None, clock=time.monotonic):
+    """Thread-safe ``progress(stage)`` for pipeline.run/run_multi (they run in a worker thread).
+
+    ``initial`` names the stage whose text the message already shows (it is not re-sent).
+    Edits ``status_msg`` on the bot's event loop at most once per ``min_interval_s`` (default 2 s;
+    stages that arrive sooner are DROPPED, not delayed) and never when the text is unchanged.
+    Every failure is swallowed: progress text is cosmetic and must not affect the run.
+    """
+    interval = PROGRESS_MIN_INTERVAL_S if min_interval_s is None else min_interval_s
+    lock = threading.Lock()
+    state = {"last_at": clock() if initial else None, "last_text": STAGE_TEXT.get(initial)}
+
+    def progress(stage: str) -> None:
+        try:
+            text = STAGE_TEXT.get(stage)
+            if text is None:
+                return
+            with lock:
+                now = clock()
+                if text == state["last_text"]:
+                    return
+                if state["last_at"] is not None and now - state["last_at"] < interval:
+                    return
+                state["last_at"], state["last_text"] = now, text
+            asyncio.run_coroutine_threadsafe(_edit_status(status_msg, text), loop)
+        except Exception:
+            pass
+
+    return progress
 
 
 async def _run_blocking(fn, timeout_s: float | None = None):
