@@ -136,10 +136,11 @@ async def _run_blocking(fn, timeout_s: float | None = None):
 
 def _course_type_list(cfg: dict, course: str) -> list[str]:
     """Return all allowed session-type strings for a typed_pair course."""
-    types_cfg = cfg["attendance"]["courses"].get(course, {}).get("types", {})
+    types_cfg = cfg["attendance"]["courses"].get(course, {}).get("types") or {}
     result: list[str] = []
     for bucket in types_cfg.values():
-        result.extend(bucket)
+        if isinstance(bucket, (list, tuple)):
+            result.extend(t for t in bucket if isinstance(t, str) and t.strip())
     return result
 
 

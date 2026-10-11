@@ -16,6 +16,7 @@ from telegram.ext import (
 )
 
 from attendance import health as health_mod, reminders as reminders_mod, roles
+from attendance.config_check import ConfigError, validate_cfg
 
 from attendance.bot.common import (
     NAMES_CONFIRM,
@@ -86,6 +87,15 @@ def main() -> None:
     if not token:
         print("ERROR: TELEGRAM_BOT_TOKEN not found in .env", file=sys.stderr)
         sys.exit(1)
+
+    try:   # fail fast on config mistakes (e.g. a typed_pair course with no session types)
+        validate_cfg(_load_cfg())
+    except ConfigError as exc:
+        log.error("bot_config_invalid", extra={"error": str(exc)})
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:   # unreadable config is handled elsewhere; keep old startup behaviour
+        log.warning("bot_config_check_skipped", extra={"error": type(exc).__name__})
 
     try:   # Feature 11: say clearly at startup who can use the bot
         for _w in roles.startup_warnings(_load_cfg()):

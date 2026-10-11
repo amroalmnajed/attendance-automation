@@ -66,6 +66,13 @@ async def handle_names_session_text(update: Update, context: ContextTypes.DEFAUL
     if context.user_data.get("nc_needs_type"):
         cfg = _load_cfg()
         all_types = _course_type_list(cfg, course)
+        if not all_types:   # an empty InlineKeyboardMarkup is a Telegram BadRequest
+            log.error("names_no_session_types", extra={"course": course})
+            await update.message.reply_text(
+                f"⚠ No session types are configured for {course.upper()}. "
+                "Please tell the admin, then send /start again.")
+            context.user_data.clear()
+            return ConversationHandler.END
         # Build numbered keyboard — one button per type
         kb = []
         for i, t in enumerate(all_types):
