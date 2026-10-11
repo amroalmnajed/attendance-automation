@@ -137,6 +137,49 @@ def _build_prompt(roster: Optional[list[str]]) -> str:
     )
 
 
+def _response_schema() -> dict:
+    """JSON schema for Gemini structured output: an array of row objects.
+
+    The roster-match fields are always declared (nullable) so one schema serves both the plain
+    and the roster-aware prompt. ``status_mark`` is required but may be null (blank cell).
+    """
+    return {
+        "type": "ARRAY",
+        "items": {
+            "type": "OBJECT",
+            "properties": {
+                "raw_name": {"type": "STRING"},
+                "status_mark": {"type": "STRING", "nullable": True},
+                "confidence": {"type": "NUMBER"},
+                "row_index": {"type": "INTEGER"},
+                "bounding_box": {"type": "ARRAY", "items": {"type": "NUMBER"}, "nullable": True},
+                "matched_roster_name": {"type": "STRING", "nullable": True},
+                "match_confidence": {"type": "NUMBER", "nullable": True},
+            },
+            "required": ["raw_name", "status_mark", "confidence", "row_index"],
+        },
+    }
+
+
+def _build_config(gtypes, structured: bool = True):
+    """GenerateContentConfig for OCR. ``structured`` asks Gemini for schema-constrained JSON."""
+    kwargs = {"temperature": 0.0, "max_output_tokens": 8192}   # deterministic output
+    if structured:
+        kwargs["response_mime_type"] = "application/json"
+        kwargs["response_schema"] = _response_schema()
+    return gtypes.GenerateContentConfig(**kwargs)
+
+
+_SCHEMA_WORDS = ("schema", "response_mime_type", "mime type", "responsemimetype")
+
+
+def _is_schema_rejection(exc: BaseException) -> bool:
+    """True for a 400 that blames the response schema / mime type (an SDK or model that can't do it)."""
+    msg = str(exc).lower()
+    is_400 = http_status(exc) == 400 or "invalid_argument" in msg
+    return is_400 and any(w in msg for w in _SCHEMA_WORDS)
+
+
 class GeminiProvider(OcrProvider):
     """OCR via Google Gemini Flash (multimodal) using google-genai SDK."""
 
@@ -214,15 +257,29 @@ class GeminiProvider(OcrProvider):
         last_error: Optional[BaseException] = None
         health_seen: set = set()   # at most one health event per kind per read
 
+        # Structured JSON output (schema) first; ONE fallback to the plain config if building it
+        # fails or the API rejects the schema. The fallback sticks for the remaining models/retries.
+        structured = {"on": True}
+
+        def _config():
+            if structured["on"]:
+                try:
+                    return _build_config(gtypes, True)
+                except Exception as exc:
+                    structured["on"] = False
+                    log.warning("gemini_schema_unavailable", extra={"error": str(exc)[:120]})
+            return _build_config(gtypes, False)
+
         def _call(model_name: str):
-            return client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=gtypes.GenerateContentConfig(
-                    temperature=0.0,   # deterministic output
-                    max_output_tokens=8192,
-                ),
-            )
+            try:
+                return client.models.generate_content(model=model_name, contents=contents, config=_config())
+            except Exception as exc:
+                if not (structured["on"] and _is_schema_rejection(exc)):
+                    raise
+                structured["on"] = False
+                log.warning("gemini_schema_rejected", extra={"model": model_name, "error": str(exc)[:120]})
+                return client.models.generate_content(
+                    model=model_name, contents=contents, config=_build_config(gtypes, False))
 
         for model_candidate in models_to_try:
             try:

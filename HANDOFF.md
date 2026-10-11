@@ -25,7 +25,7 @@ The previous chat had NO network: nothing below was test-run. Only py_compile wa
 | T2 | 9 | Config validation + empty keyboard | ✅ |
 | T3 | 7 | Matcher: normalize roster once | ✅ |
 | T4 | 17 | Cache Sheets client + roster | ✅ |
-| T5 | 8 | Gemini structured JSON output | ⬜ |
+| T5 | 8 | Gemini structured JSON output | ✅ |
 | T6 | 12 | Staged progress messages | ⬜ |
 | T7 | 25 | Review card: traffic lights + plain reason | ⬜ |
 | T8 | 26 | Crop with context + red box | ⬜ |
@@ -57,3 +57,4 @@ Markdown escaping of names elsewhere; raw `{e}` shown to users in /report, /stre
 - T2 done: attendance/config_check.py (config_problems/validate_cfg/ConfigError); bot main() exits 1 on a typed_pair course without usable types (unreadable config still tolerated as before); empty type list in the paste-names flow -> friendly message + END, never an empty keyboard; _course_type_list ignores blank/non-list buckets. +18 tests (370 passed).
 - T3 done: Matcher._norm() caches normalize_for_matching per instance (roster, OCR-hint and alias paths; cleared in reset(), capped at 5000). tests/eval_matcher.py output byte-identical before/after (run with stand-in rapidfuzz). +5 tests (375 passed).
 - T4 done: session_resolver caches the gspread client (dropped on 401/403) + resolved sessions for 60 s keyed (sheet_id, tab, course, session, type); callers get copies; `invalidate(client=False)` runs after every successful non-dry-run batch_write (all writers use it). No admin 'reload' command exists, so nothing else calls it. conftest autouse fixture clears the cache; test_network_errors unchanged and still exercises retries. +11 tests (386 passed).
+- T5 done: ocr._build_config(gtypes, structured) adds response_mime_type=application/json + response_schema (array of objects; required raw_name/status_mark/confidence/row_index; status_mark, bounding_box, matched_roster_name, match_confidence nullable). GeminiProvider.read falls back ONCE to the plain config (sticks for remaining models) if building the config raises or the API answers 400 naming the schema/mime type; other 400s still raise at once. Parser (fence stripping) untouched. LIVE API UNVERIFIED: confirm on the first real photo that responses parse and that the dict schema (uppercase types + nullable) is accepted by your google-genai version. +10 tests (396 passed).
