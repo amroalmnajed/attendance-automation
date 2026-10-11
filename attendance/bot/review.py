@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import cv2
 import os
-import re
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
@@ -18,6 +16,7 @@ from attendance.session_resolver import resolve
 from attendance.writer import WriteCell, batch_write
 
 from attendance.bot.cards import format_review_card
+from attendance.bot.crop import _crop_image
 from attendance.bot.common import SEARCH_ROSTER, _guard, _load_cfg, _notify_failure, log
 
 
@@ -61,25 +60,6 @@ async def _send_summary(chat_id: int, bot, summary, review_dir: str) -> None:
 
 # ─── Image crop helper ────────────────────────────────────────────────────────
 
-def _crop_image(img_path: str, bbox: list[float]) -> str:
-    if not bbox or len(bbox) != 4:
-        return img_path
-    try:
-        img = cv2.imread(img_path)
-        if img is None:
-            return img_path
-        h, w = img.shape[:2]
-        ymin, xmin, ymax, xmax = bbox
-        y1, y2 = max(0, int(ymin * h) - 20), min(h, int(ymax * h) + 20)
-        x1, x2 = max(0, int(xmin * w) - 20), min(w, int(xmax * w) + 20)
-        crop = img[y1:y2, x1:x2]
-        crop_path = re.sub(r"\.(jpe?g|png)$", r"_crop.\1", img_path, flags=re.IGNORECASE)
-        cv2.imwrite(crop_path, crop)
-        return crop_path
-    except Exception:
-        return img_path
-
-
 # ─── Review queue sender ──────────────────────────────────────────────────────
 
 async def _send_next_review_item(chat_id: int, bot, upload_id: str, review_dir: str) -> None:
@@ -102,31 +82,38 @@ async def _send_next_review_item(chat_id: int, bot, upload_id: str, review_dir: 
 
     img_path  = item.get("image_ref", "")
     bbox      = item.get("bounding_box")
-    crop_path = _crop_image(img_path, bbox) if bbox and os.path.exists(img_path) else img_path
+    crop_path = _crop_image(img_path, bbox) if img_path and os.path.exists(img_path) else img_path
 
     caption, rows = format_review_card(item, upload_id=upload_id, position=(current_idx, total))
     keyboard = [[InlineKeyboardButton(text, callback_data=data) for text, data in row] for row in rows]
 
     try:
-        if os.path.exists(crop_path):
-            loop = asyncio.get_running_loop()
-            file_bytes = await loop.run_in_executor(None, lambda: open(crop_path, "rb").read())
-            await bot.send_photo(
+        try:
+            if os.path.exists(crop_path):
+                loop = asyncio.get_running_loop()
+                file_bytes = await loop.run_in_executor(None, lambda: open(crop_path, "rb").read())
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=file_bytes,
+                    caption=caption,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            else:
+                raise FileNotFoundError
+        except Exception:
+            await bot.send_message(
                 chat_id=chat_id,
-                photo=file_bytes,
-                caption=caption,
+                text=caption,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN,
             )
-        else:
-            raise FileNotFoundError
-    except Exception:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=caption,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    finally:
+        if crop_path and crop_path != img_path:      # only the temp crop; never the stored review image
+            try:
+                os.remove(crop_path)
+            except OSError:
+                pass
 
 
 # ─── Resolution callback ──────────────────────────────────────────────────────

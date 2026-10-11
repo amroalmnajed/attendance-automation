@@ -27,6 +27,15 @@ CAIRO = pytz.timezone("Africa/Cairo")
 # ─── Data ─────────────────────────────────────────────────────────────────────
 
 
+def _bounding_box(ocr_row) -> Optional[list[float]]:
+    """[ymin, xmin, ymax, xmax] of the row on the photo (0..1), or None. Tolerates odd test doubles."""
+    box = getattr(ocr_row, "bounding_box", None)
+    if isinstance(box, (list, tuple)) and len(box) == 4 and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in box):
+        return [float(v) for v in box]
+    return None
+
+
 def _photo_index(ocr_row) -> Optional[int]:
     """1-based photo number for multi-photo uploads; None for single-photo uploads."""
     value = getattr(ocr_row, "photo_index", None)
@@ -106,6 +115,7 @@ class ReviewQueue:
             "session": session,
             "paper_row_index": ocr_row.row_index,
             "photo_index": _photo_index(ocr_row),
+            "bounding_box": _bounding_box(ocr_row),
             "raw_name": ocr_row.raw_name,
             "raw_mark": raw_mark,
             "session_type": session_type,
