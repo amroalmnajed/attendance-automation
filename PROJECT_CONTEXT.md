@@ -53,4 +53,4 @@
 - `pipeline.run_multi()` = several photos, one `upload_id`. `pipeline.run_text(..., marks=[...])` carries per-line marks.
 - Bot: `/done` shows a parse preview; unrecognised marks ask `pv|go|fix|cancel` first (`NAMES_CONFIRM` state). Photo handler keeps `image_paths` (list) next to the old `image_path` (first photo).
 - Gotchas: `RunSummary` is logged whole by the notifier — never put student names on it. Several tests pass `MagicMock` rows, so new fields read from rows must tolerate non-int/None values. `tests/conftest.py` protects the real alias file.
-- Line endings are mixed on purpose: `_net.py`, `ingest.py`, `ocr.py`, `session_resolver.py`, `writer.py`, `config/attendance.yaml`, `tests/test_bot_resilience.py`, `tests/test_network_errors.py`, `start.sh` are CRLF; everything else is LF. Keep each file's existing style.
+- Line endings: committed blobs are LF; the Windows working copy may show CRLF. Edit with tools that preserve each file's endings; never mass-convert. Work plan + rules: see HANDOFF.md.

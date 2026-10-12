@@ -48,3 +48,8 @@ id_ed25519*
 
 # Runtime data
 review_images/
+
+# pytest temp dirs
+.temp/
+
+review_queue_backup/
