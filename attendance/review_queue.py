@@ -19,7 +19,6 @@ import yaml
 
 from attendance.aliases import AliasStore
 from attendance.matcher import MatchResult, ReasonCode
-from attendance.normalizer import canonical_mark
 from attendance.ocr import OcrRow
 from attendance.session_resolver import SheetSession
 from attendance.writer import WriteCell, batch_write

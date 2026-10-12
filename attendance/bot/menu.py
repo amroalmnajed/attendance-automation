@@ -6,7 +6,7 @@ use, decided by the same ``roles.decide`` the handlers' guards use.
 """
 from __future__ import annotations
 
-from telegram import BotCommand, BotCommandScopeChat, Update
+from telegram import BotCommand, Update
 from telegram.ext import ContextTypes
 
 from attendance import roles

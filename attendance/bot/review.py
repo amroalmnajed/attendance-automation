@@ -14,7 +14,7 @@ from attendance.session_resolver import resolve
 
 from attendance.bot.cards import escape_markdown, format_review_card
 from attendance.bot.crop import _crop_image
-from attendance.bot.common import SEARCH_ROSTER, _guard, _load_cfg, _notify_failure, log
+from attendance.bot.common import SEARCH_ROSTER, _guard, _load_cfg, _notify_failure, _user_error_message, log
 
 
 async def _deliver_summary(chat_id: int, bot, summary, review_dir: str) -> None:
