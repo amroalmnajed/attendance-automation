@@ -17,7 +17,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
-from PIL import Image
 
 from attendance import health
 from attendance._net import http_status, is_transient, retry_call

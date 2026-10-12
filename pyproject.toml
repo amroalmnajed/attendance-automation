@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["docs", ".temp", "review_images", "review_queue", "logs"]
+
+[tool.ruff.lint]
+# Conservative on purpose: syntax errors, undefined names, unused/duplicate imports in app code.
+select = ["E9", "F63", "F7", "F82", "F401", "F811"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"]          # tests re-import fixtures by name
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

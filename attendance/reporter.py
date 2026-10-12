@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Optional, Any
 from pathlib import Path
 import os
-import yaml
 
 from core.logger import _AUDIT_PATH, get_logger
 from core.auth import get_credentials

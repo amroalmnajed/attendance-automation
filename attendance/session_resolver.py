@@ -19,7 +19,6 @@ from typing import Optional
 
 import gspread
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
-from google.oauth2.credentials import Credentials
 
 from attendance import _net
 from attendance._net import retry_call

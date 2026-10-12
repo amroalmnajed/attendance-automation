@@ -5,7 +5,6 @@ A row auto-accepts only if ALL gates pass.
 """
 from __future__ import annotations
 
-from enum import Enum
 from typing import Optional
 
 from attendance.matcher import MatchDecision, MatchResult, ReasonCode

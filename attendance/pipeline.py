@@ -17,7 +17,7 @@ from attendance import health as health_mod
 from attendance import history as history_mod
 from attendance.gates import check_all_gates
 from attendance.aliases import AliasStore
-from attendance.matcher import MatchDecision, MatchResult, ReasonCode, Candidate, build_matcher
+from attendance.matcher import MatchDecision, MatchResult, ReasonCode, build_matcher
 from attendance.normalizer import normalize_attendance_mark
 from attendance.ocr import OcrRow, build_provider
 from attendance.photos import merge_photo_rows

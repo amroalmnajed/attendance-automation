@@ -12,13 +12,12 @@ Returns a JPEG bytes object ready to be sent to the OCR provider.
 from __future__ import annotations
 
 import io
-import math
 from pathlib import Path
 from typing import Union
 
 import cv2
 import numpy as np
-from PIL import Image, ExifTags, ImageOps
+from PIL import Image, ImageOps
 
 from core.logger import get_logger
 
