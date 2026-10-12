@@ -17,8 +17,12 @@ from typing import Optional
 import pytz
 import yaml
 
+from attendance.aliases import AliasStore
 from attendance.matcher import MatchResult, ReasonCode
+from attendance.normalizer import canonical_mark
 from attendance.ocr import OcrRow
+from attendance.session_resolver import SheetSession
+from attendance.writer import WriteCell, batch_write
 from core.logger import get_logger
 
 log = get_logger("review_queue")
@@ -62,6 +66,70 @@ def _parse_iso(dt_str: str) -> datetime:
     if dt.tzinfo is None:
         dt = CAIRO.localize(dt)
     return dt
+
+
+def resolve_item(
+    item: dict,
+    roster_row: int,
+    roster_name: str,
+    attendance_value: str,
+    session_info: SheetSession,
+    cfg: dict,
+    upload_id: str,
+    dry_run: bool,
+    resolved_by: str = "unknown",
+) -> None:
+    """Shared resolution logic: write to sheet, learn alias, mark resolved.
+
+    Used by both CLI (cmd_review_resolve) and bot (handle_resolution_callback).
+    Raises on write failure; caller must mark resolved only after successful write.
+    """
+    cells: list[WriteCell] = [
+        WriteCell(
+            roster_name=roster_name,
+            sheet_row=roster_row,
+            col=session_info.session_col,
+            old_value=None,
+            new_value=attendance_value,
+        )
+    ]
+
+    # For typed_pair courses (g9/g10) also write the session-type cell
+    session_type = item.get("session_type")
+    if session_info.type_col and session_type:
+        from attendance.pipeline import _col_idx
+        ws = session_info.get_worksheet()
+        type_col_data = ws.col_values(_col_idx(session_info.type_col))
+        type_current = type_col_data[roster_row - 1] if roster_row <= len(type_col_data) else ""
+        if not type_current.strip():
+            cells.append(WriteCell(
+                roster_name=roster_name,
+                sheet_row=roster_row,
+                col=session_info.type_col,
+                old_value=type_current or None,
+                new_value=session_type,
+            ))
+
+    batch_write(
+        session_info,
+        cells,
+        upload_id=upload_id,
+        dry_run=dry_run,
+        retry_cfg=cfg["attendance"]["write"].get("retry", {}),
+    )
+
+    # Learn alias if not dry-run
+    match_cfg = cfg["attendance"].get("match", {})
+    if not dry_run and roster_row > 0 and match_cfg.get("learn_aliases", True):
+        AliasStore(
+            path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
+            min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
+        ).learn(item["course"], item["raw_name"], roster_name)
+
+    # Record variant suggestion if not dry-run
+    if not dry_run:
+        from attendance import variants as variants_mod
+        variants_mod.record_resolution(cfg, item["course"], item["raw_name"], roster_name)
 
 
 # ─── SQLite store ───────────────────────────────────────────────────────────────

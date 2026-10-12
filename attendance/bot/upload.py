@@ -38,7 +38,7 @@ from attendance.bot.review import _deliver_summary
 
 # ─── /start ───────────────────────────────────────────────────────────────────
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📷 Send a photo of the sheet", callback_data="mode|photo")],
@@ -52,7 +52,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return PHOTO_FLOW
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry-point callback for the two-mode selector on /start."""
     query = update.callback_query
@@ -78,7 +78,7 @@ async def handle_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # ─── Image upload flow ────────────────────────────────────────────────────────
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.photo:
         photo_file = await update.message.photo[-1].get_file()
@@ -203,7 +203,7 @@ async def _send_upload_menu(message, context, edit: bool = False):
     return await message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()

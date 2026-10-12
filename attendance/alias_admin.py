@@ -11,8 +11,8 @@ MAX_LINES = 25
 
 
 def admin_ids(cfg: dict, env: Optional[dict] = None) -> set[int]:
-    """Admin Telegram IDs (thin wrapper; the real logic lives in attendance/roles.py)."""
-    return roles.admin_ids(cfg, env)
+    """Authorized Telegram IDs (thin wrapper; the real logic lives in attendance/roles.py)."""
+    return roles.authorized_ids(cfg, env)
 
 
 def stale_days(cfg: dict) -> int:

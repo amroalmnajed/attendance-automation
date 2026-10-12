@@ -46,16 +46,10 @@ attendance:
   # "Mark N absent?" button after an upload. crash and main ONLY: g9 / g10 can never be
   # offered, even if listed here. Only EMPTY cells are written (overwrite: refuse still applies),
   # real writes are audited (so /revert works) and a dry-run upload only previews.
-  # Telegram admins (bot commands like /aliases). IDs here are added to the ADMIN_TELEGRAM_IDS env var
-  # (comma-separated). If NO admin is configured anywhere, admin-only commands stay unavailable.
-  admin:
+  # Bot authorized users. IDs here are added to the AUTHORIZED_TELEGRAM_IDS env var
+  # (comma-separated). If NO authorized user is configured, everyone is allowed.
+  authorized:
     telegram_ids: [5674439345]
-
-  # Bot roles (Feature 11). IDs here are added to the TEACHER_TELEGRAM_IDS env var. Teachers can upload,
-  # paste names, tap "Mark N absent?" and undo (/revert). Admins can do everything (review, /report,
-  # /streaks, /pending, /aliases, /health). If NO teacher and NO admin is configured, everyone is allowed.
-  teacher:
-    telegram_ids: []
 
   # Feature 12: missing-attendance reminders. OFF unless enabled. Needs python-telegram-bot[job-queue].
   # Uses core.app.timezone. A reminder is sent once per expected class if no upload is recorded for that

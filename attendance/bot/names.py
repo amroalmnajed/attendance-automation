@@ -29,7 +29,7 @@ from attendance.bot.review import _deliver_summary
 
 # ─── Paste-names flow ─────────────────────────────────────────────────────────
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_names_course_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """nc|course|<course> — user picked a course."""
     query = update.callback_query
@@ -50,7 +50,7 @@ async def handle_names_course_callback(update: Update, context: ContextTypes.DEF
     return NAMES_SESSION
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_names_session_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """User typed the session number."""
     text = update.message.text.strip()
@@ -91,7 +91,7 @@ async def handle_names_session_text(update: Update, context: ContextTypes.DEFAUL
     return await _ask_for_names(update.message, context, course, session, None)
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_names_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """nc|type|<index> — user picked a session type."""
     query = update.callback_query
@@ -128,7 +128,7 @@ async def _ask_for_names(message, context, course: str, session: int, stype: str
     return NAMES_PASTE
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_names_paste(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Accumulate pasted names. /done triggers processing."""
     text = update.message.text.strip()
@@ -146,7 +146,7 @@ async def handle_names_paste(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return NAMES_PASTE
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_names_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """User sent /done — parse marks, show how each line was read, then run the text pipeline.
 
@@ -193,7 +193,7 @@ async def handle_names_done(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return await _process_names(context, chat_id, names, marks)
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def handle_names_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """pv|go / pv|fix / pv|cancel — answer to the parse preview."""
     query = update.callback_query

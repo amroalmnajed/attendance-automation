@@ -14,23 +14,23 @@ from attendance.bot.common import _guard, _load_cfg, log
 
 # (command, description, required level) — order is the order shown in the menu.
 COMMANDS: list[tuple[str, str, str]] = [
-    ("start", "Start a new attendance upload", "teacher"),
-    ("upload", "Upload an attendance sheet", "teacher"),
-    ("done", "Finish pasting names", "teacher"),
-    ("cancel", "Cancel what you're doing", "teacher"),
-    ("revert", "Undo a recent upload", "teacher"),
-    ("help", "Show what I can do", "teacher"),
-    ("report", "Attendance report", "admin"),
-    ("streaks", "Students with repeated absences", "admin"),
-    ("pending", "Items waiting for review", "admin"),
-    ("aliases", "Manage learned name aliases", "strict_admin"),
-    ("health", "Bot health status", "strict_admin"),
+    ("start", "Start a new attendance upload", "authorized"),
+    ("upload", "Upload an attendance sheet", "authorized"),
+    ("done", "Finish pasting names", "authorized"),
+    ("cancel", "Cancel what you're doing", "authorized"),
+    ("revert", "Undo a recent upload", "authorized"),
+    ("help", "Show what I can do", "authorized"),
+    ("report", "Attendance report", "authorized"),
+    ("streaks", "Students with repeated absences", "authorized"),
+    ("pending", "Items waiting for review", "authorized"),
+    ("aliases", "Manage learned name aliases", "authorized"),
+    ("health", "Bot health status", "authorized"),
 ]
 
 
-def commands_for_level(*, admin: bool) -> list[tuple[str, str]]:
-    """Menu entries for a teacher (``admin=False``) or an admin (``admin=True``)."""
-    return [(c, d) for c, d, lvl in COMMANDS if admin or lvl == "teacher"]
+def commands_for_level() -> list[tuple[str, str]]:
+    """Menu entries for authorized users."""
+    return [(c, d) for c, d, lvl in COMMANDS if lvl == "authorized"]
 
 
 def allowed_commands(uid, cfg) -> list[tuple[str, str]]:
@@ -47,7 +47,7 @@ def help_text(uid, cfg) -> str:
     return "\n".join(lines)
 
 
-@_guard("teacher")
+@_guard("authorized")
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """List the commands the caller may use."""
     try:
@@ -64,12 +64,6 @@ async def post_init(application) -> None:
     try:
         cfg = _load_cfg()
         bot = application.bot
-        await bot.set_my_commands([BotCommand(c, d) for c, d in commands_for_level(admin=False)])
-        admin_menu = [BotCommand(c, d) for c, d in commands_for_level(admin=True)]
-        for admin_id in sorted(roles.admin_ids(cfg)):
-            try:
-                await bot.set_my_commands(admin_menu, scope=BotCommandScopeChat(chat_id=admin_id))
-            except Exception as exc:    # e.g. the admin never opened a chat with the bot yet
-                log.warning("admin_menu_failed", extra={"error": type(exc).__name__})
+        await bot.set_my_commands([BotCommand(c, d) for c, d in commands_for_level()])
     except Exception as exc:
         log.warning("command_menu_failed", extra={"error": type(exc).__name__})

@@ -9,18 +9,17 @@ from attendance.bot import admin, common, upload
 from attendance.bot import app as bot_app
 from tests.botutil import handler, patch_bot
 
-CFG = {"attendance": {"admin": {"telegram_ids": [1]}, "teacher": {"telegram_ids": [2]}}}
-ADMIN, TEACHER, STRANGER = 1, 2, 999
+CFG = {"attendance": {"authorized": {"telegram_ids": [1]}}}
+AUTHORIZED, STRANGER = 1, 999
 
-# who may use which handler (owner's answers: teachers AND admins may tap abs| and undo with /revert, rev|)
+# who may use which handler (all handlers now use the single "authorized" level)
 EXPECTED_LEVEL = {
-    "teacher": ["start_cmd", "handle_mode_callback", "handle_photo", "handle_upload_callback",
-                "handle_names_course_callback", "handle_names_session_text", "handle_names_type_callback",
-                "handle_names_paste", "handle_names_done", "handle_names_confirm", "cancel_cmd",
-                "cmd_revert", "handle_revert_callback", "handle_absent_callback", "cmd_help"],
-    "admin": ["handle_search_callback", "search_input_handler", "handle_resolution_callback",
-              "cmd_report", "cmd_streaks", "cmd_pending"],
-    "strict_admin": ["cmd_aliases", "cmd_health"],
+    "authorized": ["start_cmd", "handle_mode_callback", "handle_photo", "handle_upload_callback",
+                   "handle_names_course_callback", "handle_names_session_text", "handle_names_type_callback",
+                   "handle_names_paste", "handle_names_done", "handle_names_confirm", "cancel_cmd",
+                   "cmd_revert", "handle_revert_callback", "handle_absent_callback", "cmd_help",
+                   "handle_search_callback", "search_input_handler", "handle_resolution_callback",
+                   "cmd_report", "cmd_streaks", "cmd_pending", "cmd_aliases", "cmd_health"],
 }
 ALL = [(lvl, n) for lvl, names in EXPECTED_LEVEL.items() for n in names]
 
@@ -30,10 +29,8 @@ def _decide(uid, level, cfg=CFG):
 
 
 @pytest.mark.parametrize("uid,level,allowed", [
-    (ADMIN, "teacher", True), (TEACHER, "teacher", True), (STRANGER, "teacher", False),
-    (ADMIN, "admin", True), (TEACHER, "admin", False), (STRANGER, "admin", False),
-    (ADMIN, "strict_admin", True), (TEACHER, "strict_admin", False), (STRANGER, "strict_admin", False),
-    (None, "teacher", False),
+    (AUTHORIZED, "authorized", True), (STRANGER, "authorized", False),
+    (None, "authorized", False),
 ])
 def test_role_by_level_table(uid, level, allowed):
     assert _decide(uid, level) is allowed
@@ -45,20 +42,17 @@ def test_every_handler_has_the_agreed_level():
 
 
 def test_ids_merge_env_and_config_and_ignore_junk():
-    cfg = {"attendance": {"teacher": {"telegram_ids": [5, "oops"]}}}
-    assert roles.teacher_ids(cfg, {"TEACHER_TELEGRAM_IDS": "7; 8,,x"}) == {5, 7, 8}
+    cfg = {"attendance": {"authorized": {"telegram_ids": [5, "oops"]}}}
+    assert roles.authorized_ids(cfg, {"AUTHORIZED_TELEGRAM_IDS": "7; 8,,x"}) == {5, 7, 8}
 
 
-def test_no_allowlist_keeps_everything_open_except_strict_admin():
-    assert _decide(STRANGER, "teacher", {"attendance": {}})
-    assert _decide(STRANGER, "admin", {"attendance": {}})
-    assert not _decide(STRANGER, "strict_admin", {"attendance": {}})     # /aliases, /health stay closed
+def test_no_allowlist_keeps_everything_open():
+    assert _decide(STRANGER, "authorized", {"attendance": {}})
     assert roles.startup_warnings({"attendance": {}}, {})                  # clear warning at startup
 
 
-def test_teachers_only_config_closes_admin_commands_and_warns():
-    cfg = {"attendance": {"teacher": {"telegram_ids": [2]}}}
-    assert _decide(TEACHER, "teacher", cfg) and not _decide(TEACHER, "admin", cfg)
+def test_no_authorized_config_warns():
+    cfg = {"attendance": {}}
     assert roles.startup_warnings(cfg, {})
     assert roles.startup_warnings(CFG, {}) == []
 
@@ -108,24 +102,24 @@ def test_refusal_never_contains_course_or_student_data(with_cfg):
     asyncio.run(admin.cmd_report(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
     text = out["replies"][0].lower()
     for word in ("crash", "g10", "g9", "main", "student", "present"):
-        assert word not in text.replace("admins only", "")
+        assert word not in text
 
 
-def test_teacher_is_refused_on_admin_command_but_not_on_teacher_command(monkeypatch, with_cfg):
-    upd, out = _update(TEACHER)
+def test_authorized_user_allowed_on_all_commands(monkeypatch, with_cfg):
+    upd, out = _update(AUTHORIZED)
     asyncio.run(admin.cmd_report(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
-    assert "admins only" in out["replies"][0]
-    upd, out = _update(TEACHER)
+    assert not any("🔒" in r for r in out["replies"])         # allowed through to the real handler
+    upd, out = _update(AUTHORIZED)
     asyncio.run(upload.start_cmd(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
     assert not any("🔒" in r for r in out["replies"])         # allowed through to the real handler
 
 
 def test_role_check_error_means_refusal_not_access(monkeypatch):
     patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("secret-x")))
-    upd, out = _update(ADMIN)
+    upd, out = _update(AUTHORIZED)
     ran = []
 
-    @roles.guard("teacher", lambda: common._load_cfg(), None)
+    @roles.guard("authorized", lambda: common._load_cfg(), None)
     async def handler(u, c):
         ran.append(1)
     asyncio.run(handler(upd, SimpleNamespace(bot=None)))
@@ -139,7 +133,7 @@ def test_refusal_failure_never_crashes_or_grants():
     upd = SimpleNamespace(effective_user=SimpleNamespace(id=STRANGER), message=Boom(), callback_query=None)
     ran = []
 
-    @roles.guard("teacher", lambda: CFG)
+    @roles.guard("authorized", lambda: CFG)
     async def handler(u, c):
         ran.append(1)
     asyncio.run(handler(upd, SimpleNamespace(bot=None)))
@@ -153,7 +147,7 @@ def test_bot_starts_and_registers_health_without_the_scheduler_package(monkeypat
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:TEST-TOKEN-NOT-REAL")
     patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: {
         "attendance": {"review": {"local_dir": str(tmp_path / "rq")},
-                       "reminders": {"enabled": True}, "admin": {"telegram_ids": [1]}}})
+                       "reminders": {"enabled": True}, "authorized": {"telegram_ids": [1]}}})
     captured = {}
     monkeypatch.setattr(Application, "run_polling", lambda self, *a, **k: captured.setdefault("app", self))
     bot_app.main()                                   # reminders ON + no job queue must not stop startup

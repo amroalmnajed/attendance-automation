@@ -8,13 +8,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRe
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
 
-from attendance.aliases import AliasStore
 from attendance.normalizer import canonical_mark
-from attendance.review_queue import ReviewQueue
+from attendance.review_queue import ReviewQueue, resolve_item
 from attendance.session_resolver import resolve
-from attendance.writer import WriteCell, batch_write
 
-from attendance.bot.cards import format_review_card
+from attendance.bot.cards import escape_markdown, format_review_card
 from attendance.bot.crop import _crop_image
 from attendance.bot.common import SEARCH_ROSTER, _guard, _load_cfg, _notify_failure, log
 
@@ -117,7 +115,7 @@ async def _send_next_review_item(chat_id: int, bot, upload_id: str, review_dir: 
 
 # ─── Resolution callback ──────────────────────────────────────────────────────
 
-@_guard("admin")
+@_guard("authorized")
 async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -179,52 +177,17 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
 
     def _do_write():
         if roster_row > 0:
-            ws = session_info.get_worksheet()
-            cells: list[WriteCell] = [
-                WriteCell(
-                    roster_name=roster_name,
-                    sheet_row=roster_row,
-                    col=session_info.session_col,
-                    old_value=None,
-                    new_value=attendance_value,
-                )
-            ]
-
-            # For typed_pair courses (g9/g10) also write the session-type cell
-            # that sits immediately to the left of the Sx Attendance column.
-            # Previously this was silently omitted, leaving the type column blank
-            # even though the attendance value was written correctly.
-            session_type = target_item.get("session_type")
-            if session_info.type_col and session_type:
-                from attendance.pipeline import _col_idx
-                type_col_data = ws.col_values(_col_idx(session_info.type_col))
-                type_current = type_col_data[roster_row - 1] if roster_row <= len(type_col_data) else ""
-                if not type_current.strip():
-                    cells.append(WriteCell(
-                        roster_name=roster_name,
-                        sheet_row=roster_row,
-                        col=session_info.type_col,
-                        old_value=type_current or None,
-                        new_value=session_type,
-                    ))
-
-            batch_write(
-                session_info,
-                cells,
+            resolve_item(
+                item=target_item,
+                roster_row=roster_row,
+                roster_name=roster_name,
+                attendance_value=attendance_value,
+                session_info=session_info,
+                cfg=cfg,
                 upload_id=full_upload_id,
                 dry_run=cfg["core"]["app"].get("dry_run_default", True),
-                retry_cfg=cfg["attendance"]["write"].get("retry", {}),
+                resolved_by="telegram",
             )
-
-            match_cfg = cfg["attendance"].get("match", {})
-            if match_cfg.get("learn_aliases", True):
-                AliasStore(
-                    path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
-                    min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
-                ).learn(course, target_item["raw_name"], roster_name)
-            if not cfg["core"]["app"].get("dry_run_default", True):
-                from attendance import variants as variants_mod      # Feature 15: suggestion only, no effect on matching
-                variants_mod.record_resolution(cfg, course, target_item["raw_name"], roster_name)
 
         queue.resolve(
             full_upload_id,
@@ -239,16 +202,16 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
         await loop.run_in_executor(None, _do_write)
         await query.message.delete()
         await _send_next_review_item(query.message.chat_id, context.bot, full_upload_id, review_dir)
-    except Exception as e:
+    except Exception as exc:
         try:
-            await query.edit_message_caption(caption=f"❌ Error writing to sheet: {e}")
+            await query.edit_message_caption(caption=_user_error_message(exc, "sheet write"))
         except Exception:
-            await query.edit_message_text(text=f"❌ Error writing to sheet: {e}")
+            await query.edit_message_text(text=_user_error_message(exc, "sheet write"))
 
 
 # ─── Search flow ──────────────────────────────────────────────────────────────
 
-@_guard("admin", conv=True)
+@_guard("authorized", conv=True)
 async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -268,7 +231,7 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
     return SEARCH_ROSTER
 
 
-@_guard("admin", conv=True)
+@_guard("authorized", conv=True)
 async def search_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     search_term    = update.message.text.lower()
     short_upload_id = context.user_data.get("search_upload_id")
@@ -315,7 +278,7 @@ async def search_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     keyboard = []
     for roster_name, roster_row in matches:
         cb_data = f"res|{short_upload_id}|{item_id}|{roster_row}"
-        keyboard.append([InlineKeyboardButton(roster_name, callback_data=cb_data)])
+        keyboard.append([InlineKeyboardButton(escape_markdown(roster_name), callback_data=cb_data)])
 
     await update.message.reply_text("Found these students:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END

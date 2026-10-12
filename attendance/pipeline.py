@@ -6,6 +6,7 @@ Returns a RunSummary suitable for the notifier.
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -227,7 +228,9 @@ def run_multi(
             roster_names = None
 
     per_photo: list[list[OcrRow]] = []
-    for n, raw_bytes in enumerate(raw_list, start=1):
+
+    def _process_one_photo(n: int, raw_bytes: bytes) -> Optional[list[OcrRow]]:
+        """Process a single photo (preprocess + OCR). Called in parallel."""
         image_bytes = prepare(
             raw_bytes,
             orient=preprocess_cfg.get("orient", True),
@@ -238,13 +241,32 @@ def run_multi(
         )
         log.info("ocr_photo", extra={"upload_id": upload_id, "photo": n, "of": len(raw_list)})
         try:
-            per_photo.append(_read_sheet(image_bytes=image_bytes, provider=provider, roster_names=roster_names,
-                                         ocr_cfg=ocr_cfg, min_conf=min_conf, upload_id=upload_id, photo=n,
-                                         dry_run=dry_run))
+            return _read_sheet(image_bytes=image_bytes, provider=provider, roster_names=roster_names,
+                               ocr_cfg=ocr_cfg, min_conf=min_conf, upload_id=upload_id, photo=n,
+                               dry_run=dry_run)
         except Exception as exc:
             log.error("ocr_api_error", extra={"error": str(exc), "upload_id": upload_id, "photo": n})
-            summary.errors.append(f"API_ERROR: OCR failed on photo {n} of {len(raw_list)}: {exc}")
-            return summary
+            raise exc
+
+    # Process photos concurrently (up to 4 at a time to avoid overwhelming the OCR API)
+    max_workers = min(4, len(raw_list))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_process_one_photo, n, raw): n
+            for n, raw in enumerate(raw_list, start=1)
+        }
+        for future in as_completed(future_to_idx):
+            n = future_to_idx[future]
+            try:
+                result = future.result()
+                per_photo.append((n, result))
+            except Exception as exc:
+                summary.errors.append(f"API_ERROR: OCR failed on photo {n} of {len(raw_list)}: {exc}")
+                return summary
+
+    # Sort by original photo order
+    per_photo.sort(key=lambda x: x[0])
+    per_photo = [rows for _, rows in per_photo]
 
     ocr_rows = merge_photo_rows(per_photo, list(image_paths))
 

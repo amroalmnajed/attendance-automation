@@ -1,15 +1,12 @@
 """Role-based bot access (Feature 11). Pure decision logic plus one `guard` decorator.
 
-Two roles, both configured by Telegram user ID (env var and/or config, merged):
-  * teacher - env TEACHER_TELEGRAM_IDS + attendance.teacher.telegram_ids
-  * admin   - env ADMIN_TELEGRAM_IDS   + attendance.admin.telegram_ids   (admins are implicitly teachers)
+Single role configured by Telegram user ID (env var and/or config, merged):
+  * authorized - env AUTHORIZED_TELEGRAM_IDS + attendance.authorized.telegram_ids
 
 Levels a handler can require:
-  * "teacher"      - teachers and admins
-  * "admin"        - admins only
-  * "strict_admin" - admins only, and CLOSED when no admin is configured (/aliases, /health)
+  * "authorized"   - authorized users only
 
-If NO ID is configured anywhere, "teacher" and "admin" stay open to everyone (the old behaviour).
+If NO ID is configured anywhere, "authorized" stays open to everyone (the old behaviour).
 Fail-safe: if the role check itself fails, the user gets a friendly refusal, never access.
 No student/course data ever appears in a refusal; only the user's own Telegram ID.
 """
@@ -20,10 +17,9 @@ import os
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
-ADMIN_ENV = "ADMIN_TELEGRAM_IDS"
-TEACHER_ENV = "TEACHER_TELEGRAM_IDS"
+AUTHORIZED_ENV = "AUTHORIZED_TELEGRAM_IDS"
 
-TEACHER, ADMIN, STRICT_ADMIN = "teacher", "admin", "strict_admin"
+AUTHORIZED = "authorized"
 
 
 def _parse(raw: Iterable) -> set[int]:
@@ -45,61 +41,45 @@ def _collect(cfg: Optional[dict], env: Optional[dict], env_name: str, section: s
     return _parse(raw)
 
 
-def admin_ids(cfg: Optional[dict], env: Optional[dict] = None) -> set[int]:
-    return _collect(cfg, env, ADMIN_ENV, "admin")
-
-
-def teacher_ids(cfg: Optional[dict], env: Optional[dict] = None) -> set[int]:
-    """Explicitly listed teachers (admins are NOT added here; see `can_teach`)."""
-    return _collect(cfg, env, TEACHER_ENV, "teacher")
+def authorized_ids(cfg: Optional[dict], env: Optional[dict] = None) -> set[int]:
+    return _collect(cfg, env, AUTHORIZED_ENV, "authorized")
 
 
 def allowlist_configured(cfg: Optional[dict], env: Optional[dict] = None) -> bool:
-    return bool(admin_ids(cfg, env) or teacher_ids(cfg, env))
+    return bool(authorized_ids(cfg, env))
 
 
 def role_of(uid: Optional[int], cfg: Optional[dict], env: Optional[dict] = None) -> Optional[str]:
     if uid is None:
         return None
-    if uid in admin_ids(cfg, env):
-        return ADMIN
-    if uid in teacher_ids(cfg, env):
-        return TEACHER
+    if uid in authorized_ids(cfg, env):
+        return AUTHORIZED
     return None
 
 
 @dataclass(frozen=True)
 class Decision:
     allowed: bool
-    reason: str      # open | ok | unknown | not_admin | no_admin | error
+    reason: str      # open | ok | unknown | error
 
 
 def decide(uid: Optional[int], level: str, cfg: Optional[dict], env: Optional[dict] = None) -> Decision:
-    admins = admin_ids(cfg, env)
-    teachers = teacher_ids(cfg, env)
-    configured = bool(admins or teachers)
-    if level == STRICT_ADMIN:
-        if not admins:
-            return Decision(False, "no_admin")
-    elif not configured:
+    authorized = authorized_ids(cfg, env)
+    configured = bool(authorized)
+    if not configured:
         return Decision(True, "open")          # nothing configured: today's behaviour
-    role = ADMIN if uid in admins else (TEACHER if uid in teachers else None)
+    role = AUTHORIZED if uid in authorized else None
     if role is None:
         return Decision(False, "unknown")
-    if level == TEACHER:
-        return Decision(True, "ok")            # teacher or admin
-    return Decision(True, "ok") if role == ADMIN else Decision(False, "not_admin")
+    return Decision(True, "ok")
 
 
 def startup_warnings(cfg: Optional[dict], env: Optional[dict] = None) -> list[str]:
     """Plain-language warnings for the log at bot start."""
-    admins, teachers = admin_ids(cfg, env), teacher_ids(cfg, env)
-    if not admins and not teachers:
+    authorized = authorized_ids(cfg, env)
+    if not authorized:
         return ["No bot allow-list is configured: EVERYONE who finds the bot can use it. "
-                f"Set {TEACHER_ENV} / {ADMIN_ENV} and restart to restrict access."]
-    if not admins:
-        return [f"Teachers are configured but no admin: review, /report, /pending, /aliases and /health "
-                f"are closed to everyone. Set {ADMIN_ENV} and restart."]
+                f"Set {AUTHORIZED_ENV} and restart to restrict access."]
     return []
 
 
@@ -108,14 +88,8 @@ def startup_warnings(cfg: Optional[dict], env: Optional[dict] = None) -> list[st
 def refusal_text(d: Decision, level: str, uid: Optional[int]) -> str:
     if d.reason == "error":
         return "❌ Couldn't verify your access right now. Please try again in a moment."
-    if d.reason == "no_admin":
-        return ("🔒 This command is unavailable: no admin is configured yet. "
-                f"Set {ADMIN_ENV} (or attendance.admin.telegram_ids) and restart the bot.")
-    if d.reason == "not_admin":
-        return "🔒 This command is for admins only."
     who = f"Your Telegram ID is {uid}" if uid is not None else "Your Telegram ID could not be read"
-    extra = " This command is for admins only." if level in (ADMIN, STRICT_ADMIN) else ""
-    return (f"🔒 Sorry, you're not authorised to use this bot yet.{extra}\n"
+    return (f"🔒 Sorry, you're not authorised to use this bot yet.\n"
             f"{who}. Please send it to an admin so they can add you.")
 
 
@@ -123,10 +97,6 @@ def alert_text(d: Decision, level: str, uid: Optional[int]) -> str:
     """Short text for a callback-query alert (Telegram limit: 200 chars)."""
     if d.reason == "error":
         return "❌ Couldn't verify your access. Try again."
-    if d.reason == "no_admin":
-        return "🔒 Unavailable: no admin is configured."
-    if d.reason == "not_admin":
-        return "🔒 Admins only."
     return f"🔒 Not authorised. Your Telegram ID: {uid}" if uid is not None else "🔒 Not authorised."
 
 

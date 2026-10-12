@@ -372,10 +372,8 @@ def cmd_review_list(args: argparse.Namespace) -> None:
 
 
 def cmd_review_resolve(args: argparse.Namespace) -> None:
-    from attendance.aliases import AliasStore
-    from attendance.review_queue import ReviewQueue
+    from attendance.review_queue import ReviewQueue, resolve_item
     from attendance.session_resolver import resolve
-    from attendance.writer import WriteCell, batch_write
 
     cfg = _load_cfg(args.config)
     rq = ReviewQueue(store_dir=cfg["attendance"]["review"].get("local_dir", "review_queue"))
@@ -397,18 +395,16 @@ def cmd_review_resolve(args: argparse.Namespace) -> None:
 
     # Write the sheet FIRST; only mark resolved once the write succeeded (raises on failure),
     # so a failed write leaves the item pending instead of silently lost.
-    write_result = batch_write(
-        session_info,
-        [WriteCell(
-            roster_name=roster_name,
-            sheet_row=args.roster_row,
-            col=session_info.session_col,
-            old_value=None,
-            new_value=args.value,
-        )],
+    resolve_item(
+        item=item,
+        roster_row=args.roster_row,
+        roster_name=roster_name,
+        attendance_value=args.value,
+        session_info=session_info,
+        cfg=cfg,
         upload_id=args.upload_id,
         dry_run=args.dry_run,
-        retry_cfg=cfg["attendance"]["write"].get("retry", {}),
+        resolved_by="cli",
     )
 
     if args.dry_run:
@@ -424,40 +420,7 @@ def cmd_review_resolve(args: argparse.Namespace) -> None:
         resolved_by="cli",
     )
 
-    # Learn: this paper spelling → this student (skipped for "Ignore", row 0).
-    match_cfg = cfg["attendance"].get("match", {})
-    if args.roster_row > 0 and match_cfg.get("learn_aliases", True):
-        AliasStore(
-            path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
-            min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
-        ).learn(course, item["raw_name"], roster_name)
-    # Feature 15: spelling-variant SUGGESTION (separate file; only a human-approved one ever changes matching).
-    if args.roster_row > 0 and not args.dry_run:
-        from attendance import variants as variants_mod
-        variants_mod.record_resolution(cfg, course, item["raw_name"], roster_name)
-
-    # Write type cell for typed_pair courses (g9/g10)
-    session_type = getattr(args, "session_type", None) or item.get("session_type")
-    if not args.dry_run and session_type and session_info.type_col:
-        from attendance.writer import WriteCell, batch_write
-        batch_write(
-            session_info,
-            [WriteCell(
-                roster_name=roster_name,
-                sheet_row=args.roster_row,
-                col=session_info.type_col,
-                old_value=None,
-                new_value=session_type,
-            )],
-            upload_id=args.upload_id,
-            dry_run=False,
-            retry_cfg=cfg["attendance"]["write"].get("retry", {}),
-        )
-
-    if write_result.written or write_result.skipped:
-        print(f"✓ Resolved: row {args.roster_row} → '{args.value}'" + (f" (type: {session_type})" if session_type else ""))
-    else:
-        print("Resolved; no cell change needed.")
+    print(f"✓ Resolved: row {args.roster_row} → '{args.value}'")
 
 
 def cmd_review_cleanup(args: argparse.Namespace) -> None:

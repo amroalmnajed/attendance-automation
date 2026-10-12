@@ -12,6 +12,7 @@ from attendance import absent as absent_mod, alias_admin, health as health_mod
 from attendance.review_queue import ReviewQueue
 from attendance.writer import WriteCell, batch_write
 
+from attendance.bot.cards import escape_markdown
 from attendance.bot.common import (
     _guard,
     _load_cfg,
@@ -24,7 +25,7 @@ from attendance.bot.common import (
 
 # ─── Administrative commands ──────────────────────────────────────────────────
 
-@_guard("admin")
+@_guard("authorized")
 async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parts = update.message.text.split()
     if len(parts) != 3:
@@ -46,13 +47,13 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         msg  = f"📊 *Report: {course.upper()} S{session}*\n"
         msg += f"Present: {rep['present']} / {rep['total_students']} ({rep['attendance_rate']:.1f}%)\n"
         msg += f"Review Backlog: {rep['review_backlog']} items\n\n*Absentees:*\n"
-        msg += "\n".join(f"• {a}" for a in rep["absentees"]) if rep["absentees"] else "• None"
+        msg += "\n".join(f"• {escape_markdown(a)}" for a in rep["absentees"]) if rep["absentees"] else "• None"
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error generating report: {e}")
+    except Exception as exc:
+        await update.message.reply_text(_user_error_message(exc, "report"))
 
 
-@_guard("admin")
+@_guard("authorized")
 async def cmd_streaks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parts = update.message.text.split()
     if len(parts) < 2:
@@ -72,13 +73,13 @@ async def cmd_streaks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         streaks = await loop.run_in_executor(None, generate_streaks_report, course, consec, cfg)
 
         msg = f"📉 *Chronic Absentees ({course.upper()} - past {consec} sessions)*\n"
-        msg += "\n".join(f"• Row {s['row']}: {s['name']}" for s in streaks) if streaks else "• None found"
+        msg += "\n".join(f"• Row {s['row']}: {escape_markdown(s['name'])}" for s in streaks) if streaks else "• None found"
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
+    except Exception as exc:
+        await update.message.reply_text(_user_error_message(exc, "streaks report"))
 
 
-@_guard("teacher")
+@_guard("authorized")
 async def cmd_revert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parts = update.message.text.split()
     if len(parts) < 2:
@@ -134,11 +135,11 @@ async def cmd_revert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         success, msg = await loop.run_in_executor(None, _do_revert)
         await update.message.reply_text(("✅ " if success else "❌ ") + msg)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
+    except Exception as exc:
+        await update.message.reply_text(_user_error_message(exc, "revert"))
 
 
-@_guard("teacher")
+@_guard("authorized")
 async def handle_revert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 🔄 Undo / Revert inline button (callback_data='rev|<upload_id>')."""
     query = update.callback_query
@@ -194,8 +195,8 @@ async def handle_revert_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         success, msg = await loop.run_in_executor(None, _do_revert)
         await query.edit_message_text(("✅ " if success else "❌ ") + msg)
-    except Exception as e:
-        await query.edit_message_text(f"❌ Error: {e}")
+    except Exception as exc:
+        await query.edit_message_text(_user_error_message(exc, "revert"))
 
 
 _ABSENT_INFLIGHT: set[str] = set()
@@ -222,7 +223,7 @@ def _absent_result_text(res: "absent_mod.AbsentResult") -> str:
     }.get(res.reason, "❌ I couldn't mark anyone absent. Nothing was changed.")
 
 
-@_guard("teacher")
+@_guard("authorized")
 async def handle_absent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 🙈 Mark N absent? button (callback_data='abs|<upload_id>'). crash/main only."""
     query = update.callback_query
@@ -265,7 +266,7 @@ async def handle_absent_callback(update: Update, context: ContextTypes.DEFAULT_T
             pass
 
 
-@_guard("admin")
+@_guard("authorized")
 async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     cfg        = _load_cfg()
     review_dir = Path(cfg["attendance"]["review"].get("local_dir", "review_queue"))
@@ -287,23 +288,19 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 
-@_guard("strict_admin")
+@_guard("authorized")
 async def cmd_aliases(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin-only: /aliases [list [course] | flagged | remove <course> <paper name>].
-
-    Unavailable (not open to everyone) until an admin is configured: ADMIN_TELEGRAM_IDS env var
-    and/or attendance.admin.telegram_ids. Full role checks for every handler arrive in Phase 4.
-    """
+    """Manage learned name aliases: /aliases [list [course] | flagged | remove <course> <paper name>]."""
     try:
         cfg = _load_cfg()
         ids = alias_admin.admin_ids(cfg)
         user = getattr(update, "effective_user", None)
         uid = getattr(user, "id", None)
         if not ids:
-            text = ("🔒 Alias management is unavailable: no admin is configured yet. "
-                    "Set ADMIN_TELEGRAM_IDS (or attendance.admin.telegram_ids) and restart the bot.")
+            text = ("🔒 Alias management is unavailable: no authorized user is configured yet. "
+                    "Set AUTHORIZED_TELEGRAM_IDS (or attendance.authorized.telegram_ids) and restart the bot.")
         elif uid not in ids:
-            text = "🔒 This command is for admins only."
+            text = "🔒 This command is for authorized users only."
         else:
             text = alias_admin.handle(list(getattr(context, "args", None) or []), cfg)
     except Exception as exc:   # never log names; only the error type/message
@@ -312,9 +309,9 @@ async def cmd_aliases(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(text[:3900])
 
 
-@_guard("strict_admin")
+@_guard("authorized")
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin-only: plain-language status (Gemini / Sheets failures, review age, last alerts, reminders)."""
+    """Plain-language status (Gemini / Sheets failures, review age, last alerts, reminders)."""
     try:
         cfg = _load_cfg()
         jq = getattr(getattr(context, "application", None), "job_queue", None)

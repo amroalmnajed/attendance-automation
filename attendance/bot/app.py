@@ -74,7 +74,7 @@ async def _global_error_handler(update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _notify_failure(context.bot, chat.id, _user_error_message(exc, "request"))
 
 
-@_guard("teacher", conv=True)
+@_guard("authorized", conv=True)
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Cancelled.", reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
