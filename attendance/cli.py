@@ -72,7 +72,6 @@ def _load_cfg(path: str = "config/attendance.yaml") -> dict:
 
 def cmd_process(args: argparse.Namespace) -> None:
     from attendance.pipeline import run
-    from core.notifier import RunSummary
 
     cfg = _load_cfg(args.config)
     dry_run = args.dry_run
@@ -297,7 +296,6 @@ def _parse_marks_with_preview(lines: list[str], *, always_confirm: bool, assume_
 
 def cmd_process_text(args: argparse.Namespace) -> None:
     from attendance.pipeline import run_text
-    from core.notifier import RunSummary
     
     cfg = _load_cfg(args.config)
     
@@ -748,7 +746,6 @@ def cmd_report_streaks(args: argparse.Namespace) -> None:
 def cmd_revert(args: argparse.Namespace) -> None:
     from attendance.reporter import read_audit_log, plan_revert
     from attendance.writer import WriteCell, batch_write
-    from attendance.session_resolver import resolve
     
     audit_records = read_audit_log()
     plan = plan_revert(args.upload_id, audit_records)

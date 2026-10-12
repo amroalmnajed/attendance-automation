@@ -2,7 +2,6 @@
 without Telegram. Student names appear only in the reply to an admin, never in logs."""
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from attendance import roles

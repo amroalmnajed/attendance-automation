@@ -6,7 +6,6 @@ Returns a RunSummary suitable for the notifier.
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
 from typing import Callable, Optional
 
