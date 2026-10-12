@@ -34,11 +34,14 @@ W_SORT = [0.3, 0.4, 0.5, 0.6, 0.7]
 
 def load_cases(review_dir: str):
     """-> (cases, rosters). case = (course, raw_name, ocr_confidence, expected_name)."""
+    from attendance.review_queue import ReviewQueue
     cases, names = [], defaultdict(set)
-    for f in sorted(Path(review_dir).glob("*.json")):
+    rq = ReviewQueue(store_dir=review_dir)
+    for upload_id in rq._store.list_all_upload_ids():
         try:
-            items = json.loads(f.read_text(encoding="utf-8")).get("items", [])
-        except (OSError, ValueError):
+            data = rq._load(upload_id)
+            items = data.get("items", [])
+        except Exception:
             continue
         for it in items:
             course = it.get("course", "?")

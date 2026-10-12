@@ -270,15 +270,11 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     cfg        = _load_cfg()
     review_dir = Path(cfg["attendance"]["review"].get("local_dir", "review_queue"))
 
-    if not review_dir.exists():
-        await update.message.reply_text("No pending items.")
-        return
-
     queue           = ReviewQueue(store_dir=str(review_dir))
     pending_uploads = [
-        (f.stem, len(queue.list_pending(f.stem)))
-        for f in review_dir.glob("*.json")
-        if queue.list_pending(f.stem)
+        (uid, len(queue.list_pending(uid)))
+        for uid in queue._store.list_all_upload_ids()
+        if queue.list_pending(uid)
     ]
 
     if not pending_uploads:

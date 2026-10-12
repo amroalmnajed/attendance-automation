@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.constants import ParseMode
@@ -139,10 +138,7 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
 
     def _find_upload():
         queue    = ReviewQueue(store_dir=review_dir)
-        full_uid = None
-        for p in Path(review_dir).glob(f"{short_upload_id}*.json"):
-            full_uid = p.stem
-            break
+        full_uid = queue.find_by_prefix(short_upload_id)
         if not full_uid:
             return None, None, None
         return full_uid, queue, queue.list_pending(full_uid)
@@ -289,10 +285,7 @@ async def search_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     def _find_upload():
         queue    = ReviewQueue(store_dir=review_dir)
-        full_uid = None
-        for p in Path(review_dir).glob(f"{short_upload_id}*.json"):
-            full_uid = p.stem
-            break
+        full_uid = queue.find_by_prefix(short_upload_id)
         if not full_uid:
             return None, None, None
         return full_uid, queue, queue.list_pending(full_uid)

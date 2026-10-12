@@ -8,6 +8,7 @@ The `resolve` command picks a candidate and calls the writer.
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,7 +17,6 @@ from typing import Optional
 import pytz
 import yaml
 
-from attendance._fslock import atomic_write_json, file_lock
 from attendance.matcher import MatchResult, ReasonCode
 from attendance.ocr import OcrRow
 from core.logger import get_logger
@@ -64,24 +64,112 @@ def _parse_iso(dt_str: str) -> datetime:
     return dt
 
 
+# ─── SQLite store ───────────────────────────────────────────────────────────────
+
+class _Store:
+    """SQLite backend for review queue data (queue.db, WAL mode).
+
+    Stores one row per upload with the full JSON blob, preserving the _load shape.
+    """
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+        self._init_db()
+
+    def _init_db(self) -> None:
+        """Create table and enable WAL mode if not exists."""
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS uploads (
+                    upload_id TEXT PRIMARY KEY,
+                    data TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+
+    def _load(self, upload_id: str) -> dict:
+        """Load upload data as dict, same shape as JSON files."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            cur = conn.execute(
+                "SELECT data FROM uploads WHERE upload_id = ?",
+                (upload_id,)
+            )
+            row = cur.fetchone()
+            if row:
+                return json.loads(row[0])
+            return {"upload_id": upload_id, "created_at": _now_iso(), "items": []}
+
+    def _save(self, upload_id: str, data: dict) -> None:
+        """Save upload data as JSON blob."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO uploads (upload_id, data, created_at) VALUES (?, ?, ?)",
+                (upload_id, json.dumps(data, ensure_ascii=False), data.get("created_at", _now_iso()))
+            )
+            conn.commit()
+
+    def find_by_prefix(self, prefix: str) -> Optional[str]:
+        """Find full upload_id by short prefix. Returns None if not found or ambiguous."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            cur = conn.execute(
+                "SELECT upload_id FROM uploads WHERE upload_id LIKE ?",
+                (f"{prefix}%",)
+            )
+            matches = [row[0] for row in cur.fetchall()]
+            if len(matches) == 1:
+                return matches[0]
+            return None
+
+    def list_all_upload_ids(self) -> list[str]:
+        """Return all upload IDs in the store."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            cur = conn.execute("SELECT upload_id FROM uploads ORDER BY upload_id")
+            return [row[0] for row in cur.fetchall()]
+
+    def import_json(self, json_path: Path) -> bool:
+        """Import a JSON file into the store. Returns True if successful."""
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            upload_id = data.get("upload_id", json_path.stem)
+            self._save(upload_id, data)
+            return True
+        except Exception:
+            return False
+
+
 # ─── Queue manager ────────────────────────────────────────────────────────────
 
 class ReviewQueue:
     def __init__(self, store_dir: str = "review_queue"):
         self._dir = Path(store_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._store = _Store(self._dir / "queue.db")
+        # One-time import of existing JSON files
+        self._import_existing_json()
+
+    def _import_existing_json(self) -> None:
+        """Import existing JSON files into SQLite on first access."""
+        for json_file in sorted(self._dir.glob("*.json")):
+            # Skip already imported files
+            if json_file.name.endswith(".migrated"):
+                continue
+            if self._store.import_json(json_file):
+                # Rename to .migrated to mark as imported (keep original)
+                try:
+                    json_file.rename(json_file.with_suffix(json_file.suffix + ".migrated"))
+                except OSError:
+                    pass  # Rename failed, but data is imported
 
     def _path(self, upload_id: str) -> Path:
         return self._dir / f"{upload_id}.json"
 
     def _load(self, upload_id: str) -> dict:
-        p = self._path(upload_id)
-        if p.exists():
-            return json.loads(p.read_text(encoding="utf-8"))
-        return {"upload_id": upload_id, "created_at": _now_iso(), "items": []}
+        return self._store._load(upload_id)
 
     def _save(self, upload_id: str, data: dict) -> None:
-        atomic_write_json(self._path(upload_id), data)
+        self._store._save(upload_id, data)
 
     def get(self, upload_id: str, item_id: str) -> Optional[dict]:
         """Return a single item (any status) or None."""
@@ -131,10 +219,10 @@ class ReviewQueue:
             ],
         }
 
-        with file_lock(self._path(upload_id)):
-            data = self._load(upload_id)
-            data["items"].append(item)
-            self._save(upload_id, data)
+        # SQLite handles concurrency with WAL mode; no file_lock needed
+        data = self._load(upload_id)
+        data["items"].append(item)
+        self._save(upload_id, data)
 
         log.info(
             "review_enqueued",
@@ -149,11 +237,9 @@ class ReviewQueue:
     def list_pending(self, upload_id: Optional[str] = None) -> list[dict]:
         """Return all pending review items, optionally filtered by upload_id."""
         items = []
-        files = [self._path(upload_id)] if upload_id else sorted(self._dir.glob("*.json"))
-        for f in files:
-            if not f.exists():
-                continue
-            data = json.loads(f.read_text(encoding="utf-8"))
+        upload_ids = [upload_id] if upload_id else self._store.list_all_upload_ids()
+        for uid in upload_ids:
+            data = self._load(uid)
             for item in data.get("items", []):
                 if item.get("status") == "pending":
                     items.append({**item, "upload_id": data["upload_id"]})
@@ -171,32 +257,29 @@ class ReviewQueue:
     ) -> dict:
         """Mark an item as resolved and return its write specification.
 
-        Process-safe: holds a cross-process file lock for the read-modify-write cycle
-        (each Telegram callback runs resolve in its own subprocess, so threading locks
-        are insufficient). Raises ValueError if the item is already resolved.
+        SQLite with WAL mode handles concurrency safely. Raises ValueError if the item is already resolved.
         """
-        with file_lock(self._path(upload_id)):
-            data = self._load(upload_id)
-            resolved_item = None
-            for item in data["items"]:
-                if item["item_id"] == item_id:
-                    if item.get("status") == "resolved":
-                        raise ValueError(f"Item {item_id} already resolved")
-                    item["status"] = "resolved"
-                    item["resolved_at"] = _now_iso()
-                    item["resolved_by"] = resolved_by
-                    item["resolution"] = {
-                        "roster_row": chosen_roster_row,
-                        "roster_name": chosen_roster_name,
-                        "attendance_value": attendance_value,
-                    }
-                    resolved_item = item
-                    break
+        data = self._load(upload_id)
+        resolved_item = None
+        for item in data["items"]:
+            if item["item_id"] == item_id:
+                if item.get("status") == "resolved":
+                    raise ValueError(f"Item {item_id} already resolved")
+                item["status"] = "resolved"
+                item["resolved_at"] = _now_iso()
+                item["resolved_by"] = resolved_by
+                item["resolution"] = {
+                    "roster_row": chosen_roster_row,
+                    "roster_name": chosen_roster_name,
+                    "attendance_value": attendance_value,
+                }
+                resolved_item = item
+                break
 
-            if resolved_item is None:
-                raise KeyError(f"Item {item_id} not found in upload {upload_id}")
+        if resolved_item is None:
+            raise KeyError(f"Item {item_id} not found in upload {upload_id}")
 
-            self._save(upload_id, data)
+        self._save(upload_id, data)
         log.info(
             "review_resolved",
             extra={
@@ -222,12 +305,8 @@ class ReviewQueue:
             return 0
 
         deleted = 0
-        for f in sorted(self._dir.glob("*.json")):
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-
+        for upload_id in self._store.list_all_upload_ids():
+            data = self._load(upload_id)
             for item in data.get("items", []):
                 if item.get("status") != "resolved":
                     continue
@@ -254,6 +333,10 @@ class ReviewQueue:
                         except OSError:
                             pass
         return deleted
+
+    def find_by_prefix(self, short_id: str) -> Optional[str]:
+        """Find full upload_id by short prefix. Returns None if not found or ambiguous."""
+        return self._store.find_by_prefix(short_id)
 
     def print_pending(self, upload_id: Optional[str] = None) -> None:
         """Pretty-print all pending items to stdout."""

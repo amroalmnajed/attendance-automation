@@ -216,12 +216,14 @@ def review_backlog(review_dir: str, now: Optional[datetime] = None) -> tuple[int
     now = now or datetime.now(timezone.utc)
     count, oldest = 0, None
     try:
-        files = sorted(Path(review_dir).glob("*.json"))
-    except OSError:
+        from attendance.review_queue import ReviewQueue
+        rq = ReviewQueue(store_dir=review_dir)
+        upload_ids = rq._store.list_all_upload_ids()
+    except Exception:
         return 0, None
-    for f in files:
+    for upload_id in upload_ids:
         try:
-            data = json.loads(f.read_text(encoding="utf-8"))
+            data = rq._load(upload_id)
             pending = sum(1 for i in data.get("items", []) if isinstance(i, dict) and i.get("status") == "pending")
             if not pending:
                 continue

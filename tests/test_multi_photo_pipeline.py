@@ -88,7 +88,9 @@ def test_conflicting_marks_go_to_review_and_are_not_written(env, monkeypatch):
     s = go(env, monkeypatch, prov, env.photos[:2])
     assert s.flagged == 1 and s.matched == 1
     assert [u["range"] for u in env.ws.updates] == ["E3"]                       # Ahmed not written
-    data = json.loads((env.tmp / "rq" / f"{s.upload_id}.json").read_text(encoding="utf-8"))
+    from attendance.review_queue import ReviewQueue
+    rq = ReviewQueue(store_dir=str(env.tmp / "rq"))
+    data = rq._load(s.upload_id)
     item = data["items"][0]
     assert item["reason_code"] == "PHOTO_MARK_CONFLICT"
     assert item["raw_mark"] == "Present / Absent"
@@ -101,7 +103,9 @@ def test_review_items_point_at_their_own_photo(env, monkeypatch):
         b"photo-two": [r("Zzzz Unknownperson", "P", 1)],
     })
     s = go(env, monkeypatch, prov, env.photos[:2])
-    item = json.loads((env.tmp / "rq" / f"{s.upload_id}.json").read_text(encoding="utf-8"))["items"][0]
+    from attendance.review_queue import ReviewQueue
+    rq = ReviewQueue(store_dir=str(env.tmp / "rq"))
+    item = rq._load(s.upload_id)["items"][0]
     assert item["image_ref"] == env.photos[1] and item["photo_index"] == 2
 
 
