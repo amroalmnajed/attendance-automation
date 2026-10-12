@@ -17,7 +17,7 @@ EXPECTED_LEVEL = {
     "teacher": ["start_cmd", "handle_mode_callback", "handle_photo", "handle_upload_callback",
                 "handle_names_course_callback", "handle_names_session_text", "handle_names_type_callback",
                 "handle_names_paste", "handle_names_done", "handle_names_confirm", "cancel_cmd",
-                "cmd_revert", "handle_revert_callback", "handle_absent_callback"],
+                "cmd_revert", "handle_revert_callback", "handle_absent_callback", "cmd_help"],
     "admin": ["handle_search_callback", "search_input_handler", "handle_resolution_callback",
               "cmd_report", "cmd_streaks", "cmd_pending"],
     "strict_admin": ["cmd_aliases", "cmd_health"],

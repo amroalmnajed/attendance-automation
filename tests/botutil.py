@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib
 
-_MODULES = ("common", "upload", "names", "review", "admin", "app")
+_MODULES = ("common", "upload", "names", "review", "admin", "menu", "app")
 
 
 def bot_modules():

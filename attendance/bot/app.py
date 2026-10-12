@@ -16,6 +16,7 @@ from telegram.ext import (
 )
 
 from attendance import health as health_mod, reminders as reminders_mod, roles
+from attendance.bot.menu import cmd_help, post_init
 from attendance.config_check import ConfigError, validate_cfg
 
 from attendance.bot.common import (
@@ -103,7 +104,7 @@ def main() -> None:
     except Exception as exc:
         log.warning("bot_access_check_failed", extra={"error": type(exc).__name__})
 
-    app = ApplicationBuilder().token(token).build()
+    app = ApplicationBuilder().token(token).post_init(post_init).build()
 
     conv_handler = ConversationHandler(
         entry_points=[
@@ -153,6 +154,7 @@ def main() -> None:
     app.add_handler(CommandHandler("pending", cmd_pending))
     app.add_handler(CommandHandler("aliases", cmd_aliases))
     app.add_handler(CommandHandler("health",  cmd_health))
+    app.add_handler(CommandHandler("help",    cmd_help))
     app.add_error_handler(_global_error_handler)
 
     try:   # Feature 13: remember where health state lives, schedule the review-age check
