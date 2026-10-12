@@ -31,7 +31,7 @@ The previous chat had NO network: nothing below was test-run. Only py_compile wa
 | T8 | 26 | Crop with context + red box | ✅ |
 | T9 | 29 | Command menu per role + /help | ✅ |
 | T10 | 21 | CI, pyproject, README, lock, unused imports | ✅ |
-| T11 | 22 | Matcher threshold tuning script | ⬜ |
+| T11 | 22 | Matcher threshold tuning script | ✅ |
 | T12 | 20 | SQLite review queue (optional, last, own session) | ⬜ |
 
 ## Specs
@@ -64,3 +64,5 @@ Markdown escaping of names elsewhere; raw `{e}` shown to users in /report, /stre
 - T9 done: attendance/bot/menu.py (COMMANDS table with required level; help_text/allowed_commands use roles.decide so /help matches the guards; cmd_help @_guard('teacher') + in test_roles EXPECTED_LEVEL; post_init sets default menu = teacher commands and a per-admin-chat menu (BotCommandScopeChat, ids from roles.admin_ids); failures only logged). main() uses ApplicationBuilder().token(t).post_init(post_init). Note: in open mode (no allow-list) /help also lists admin commands because the guards allow them; strict_admin ones (aliases, health) stay hidden. Real PTB set_my_commands UNVERIFIED here. +8 tests (458 passed).
 - T10 (partial, in progress): added pyproject.toml (ruff E9/F63/F7/F82/F401/F811 + pytest cfg), .github/workflows/ci.yml, README.md (<60 lines), removed the unused imports (gates.Enum, ocr.Image, pipeline.Candidate, preprocess.math/ExifTags, reporter.yaml, session_resolver.Credentials, variants.Optional, writer.gspread; ingest.ReplyKeyboardMarkup vanished with T1) after checking tests don't patch them. requirements.lock NOT created: no network here -> run `uv pip compile requirements.txt -o requirements.lock` on a connected machine. ruff itself was not available here, so `ruff check .` is unverified (checked undefined names with a bytecode scan instead).
 - T10 done (see previous line; only requirements.lock is outstanding because it needs network). 458 passed.
+- T11 done: tests/tune_matcher.py (python tests/tune_matcher.py [--dir review_queue] [--top N]) replays resolved items (roster_row>0) over t_high 80-92 x margin 5-15 x w_sort 0.3-0.7, sorted fewest WRONG auto-accepts then most auto-accepts, counts only, marks current config, never edits config. Roster is approximated from names seen in the queue (documented in the file). Only 13 resolved items exist locally -> too few to act on yet. +6 tests (464 passed).
+- STATE FOR NEXT AI: T1-T11 done and committed. ONLY T12 (SQLite review queue, risky, do alone) remains. Still unverified on real deps: PTB (post_init/set_my_commands, progress edits), gspread, Gemini schema (T5), ruff config, requirements.lock (needs network). First step on a real machine: pip install -r requirements.txt && pytest -q (expect ~464 passed) and ruff check .
