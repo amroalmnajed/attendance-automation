@@ -127,11 +127,15 @@ def fetch_past_meeting_participants(
     # Build endpoint URL
     if instance_uuid:
         url = f"{api_base}/past_meetings/{meeting_id}/instances/{instance_uuid}/participants"
+        log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "instance_uuid": instance_uuid, "url": url})
     else:
         url = f"{api_base}/past_meetings/{meeting_id}/participants"
+        log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "url": url})
 
     try:
         response = httpx.get(url, headers=headers, timeout=30)
+        log.info("zoom_participants_response", extra={"status": response.status_code, "url": url})
+
         response.raise_for_status()
         data = response.json()
 
@@ -153,16 +157,22 @@ def fetch_past_meeting_participants(
         return normalized
 
     except httpx.HTTPStatusError as e:
+        response_text = e.response.text if hasattr(e.response, 'text') else str(e)
+        log.error("zoom_participants_http_error", extra={
+            "status": e.response.status_code,
+            "text": response_text,
+            "url": url,
+            "instance_uuid": instance_uuid
+        })
         if e.response.status_code == 404:
             raise RuntimeError(f"Meeting not found: {meeting_id}") from e
         elif e.response.status_code == 400:
-            # Report not ready yet
-            raise RuntimeError("Participant report not ready yet. Zoom can take 5-15 minutes to generate reports after a meeting ends. Try again later or use CSV upload instead.") from e
+            # Report not ready yet or invalid request
+            raise RuntimeError(f"Participant report error (400): {response_text[:200]}. This may be due to invalid instance UUID or API limitations. Try CSV upload instead.") from e
         else:
-            log.error("zoom_participants_http_error", extra={"status": e.response.status_code, "text": e.response.text})
-            raise RuntimeError(f"Zoom API failed: {e.response.status_code}") from e
+            raise RuntimeError(f"Zoom API failed: {e.response.status_code} - {response_text[:200]}") from e
     except Exception as e:
-        log.error("zoom_participants_error", extra={"error": str(e)})
+        log.error("zoom_participants_error", extra={"error": str(e), "url": url})
         raise RuntimeError(f"Failed to fetch participants: {e}") from e
 
 
