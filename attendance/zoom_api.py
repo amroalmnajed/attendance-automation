@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import os
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 import httpx
@@ -14,6 +15,23 @@ import httpx
 from core.logger import get_logger
 
 log = get_logger("zoom_api")
+
+
+def _parse_zoom_datetime(dt_str: Optional[str]) -> Optional[datetime]:
+    """Parse Zoom API datetime string to datetime object.
+
+    Zoom API returns ISO 8601 format like: "2026-10-13T17:07:42Z"
+    """
+    if not dt_str:
+        return None
+    try:
+        # Handle ISO 8601 format with or without timezone
+        if dt_str.endswith('Z'):
+            dt_str = dt_str[:-1] + '+00:00'
+        return datetime.fromisoformat(dt_str)
+    except (ValueError, TypeError):
+        log.warning("zoom_datetime_parse_failed", extra={"dt_str": dt_str})
+        return None
 
 
 # ─── OAuth token management ─────────────────────────────────────────────────────
@@ -147,8 +165,8 @@ def fetch_past_meeting_participants(
             normalized.append({
                 "name": p.get("name", ""),
                 "email": p.get("email"),
-                "join_time": p.get("join_time"),
-                "leave_time": p.get("leave_time"),
+                "join_time": _parse_zoom_datetime(p.get("join_time")),
+                "leave_time": _parse_zoom_datetime(p.get("leave_time")),
                 "duration_minutes": p.get("duration", 0),
                 "guest": p.get("guest", "") == "true",
             })
