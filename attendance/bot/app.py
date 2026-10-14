@@ -31,6 +31,7 @@ from attendance.bot.common import (
     ZOOM_MEETING_ID,
     ZOOM_PICK_INSTANCE,
     ZOOM_PICK_TYPE,
+    ZOOM_SESSION_NUM,
     ZOOM_TEACHER_TIME,
     _guard,
     _load_cfg,
@@ -77,6 +78,7 @@ from attendance.bot.zoom import (
     handle_zoom_instance_callback,
     handle_zoom_meeting_id_text,
     handle_zoom_reprocess_callback,
+    handle_zoom_session_num_text,
     handle_zoom_teacher_time_text,
     handle_zoom_type_callback,
 )
@@ -175,6 +177,9 @@ def main() -> None:
             ],
             ZOOM_TEACHER_TIME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_zoom_teacher_time_text),
+            ],
+            ZOOM_SESSION_NUM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_zoom_session_num_text),
             ],
             ZOOM_CONFIRM: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_zoom_confirm_text),

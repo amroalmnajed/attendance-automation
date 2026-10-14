@@ -27,6 +27,7 @@ from attendance.bot.common import (
     ZOOM_MEETING_ID,
     ZOOM_PICK_INSTANCE,
     ZOOM_PICK_TYPE,
+    ZOOM_SESSION_NUM,
     ZOOM_TEACHER_TIME,
     _StaleSession,
     _course_type_list,
@@ -171,13 +172,36 @@ async def _handle_instances_or_date(
     """Check for multiple instances (API fetch) or ask for date (CSV upload)."""
     source_type = context.user_data.get("zoom_source_type", "api")
 
+    if source_type == "csv":
+        # CSV upload - ask for date
+        await update.message.reply_text(
+            f"📹 Meeting ID: `{meeting_id}` · Course: `{course.upper()}`\n\n"
+            f"Enter the meeting date (format: `YYYY-MM-DD`, e.g., `2026-09-13`):",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ZOOM_TEACHER_TIME
+
     if source_type == "api":
         # List instances for recurring meetings
         try:
             instances = await _run_blocking(
                 lambda: list_recent_meeting_instances(meeting_id, _load_cfg().get("attendance", {}).get("zoom_csv", {}).get("zoom_api", {}))
             )
-            if len(instances) > 1:
+            if len(instances) == 0:
+                await update.message.reply_text(
+                    f"⚠️ No meeting instances found for ID `{meeting_id}`.\n\n"
+                    f"The meeting may not have happened yet, or you don't have access.\n\n"
+                    f"Please use `/zoom_upload` to upload the CSV file manually instead.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return ConversationHandler.END
+            elif len(instances) == 1:
+                # Single instance - use it directly
+                inst = instances[0]
+                context.user_data["zoom_instance_uuid"] = inst.get("uuid")
+                context.user_data["zoom_date"] = inst.get("start_time", "")
+                return await _handle_session_type(update, context)
+            elif len(instances) > 1:
                 # Build keyboard with instances
                 kb = []
                 for i, inst in enumerate(instances[:10]):
@@ -194,21 +218,13 @@ async def _handle_instances_or_date(
                 return ZOOM_PICK_INSTANCE
         except Exception as e:
             log.warning("zoom_instances_failed", extra={"error": str(e), "meeting_id": meeting_id})
-            # Show error to user and fall through to ask for date
             error_msg = str(e)
-            if "not found" in error_msg.lower():
-                await update.message.reply_text(
-                    f"⚠️ Meeting not found or hasn't happened yet.\n\n"
-                    f"Please enter the meeting date (format: `YYYY-MM-DD`, e.g., `2026-09-13`):",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-            else:
-                await update.message.reply_text(
-                    f"⚠️ Could not fetch meeting instances: {error_msg}\n\n"
-                    f"Please enter the meeting date (format: `YYYY-MM-DD`, e.g., `2026-09-13`):",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-            return ZOOM_TEACHER_TIME
+            await update.message.reply_text(
+                f"⚠️ Could not fetch meeting instances: {error_msg}\n\n"
+                f"Please use `/zoom_upload` to upload the CSV file manually instead.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return ConversationHandler.END
 
 
 # ─── Callback handlers ───────────────────────────────────────────────────────
@@ -225,20 +241,7 @@ async def handle_zoom_course_callback(update: Update, context: ContextTypes.DEFA
     context.user_data["zoom_course"] = course
     context.user_data["zoom_source_type"] = "api"
 
-    try:
-        return await _handle_instances_or_date(update, context, meeting_id, course)
-    except Exception as e:
-        error_msg = str(e)
-        if "not found" in error_msg.lower():
-            await query.edit_message_text(
-                f"⚠️ Meeting not found or hasn't happened yet.\n\n"
-                f"Please try again with a different meeting ID."
-            )
-        else:
-            await query.edit_message_text(
-                f"⚠️ Error: {error_msg}"
-            )
-        return ConversationHandler.END
+    return await _handle_instances_or_date(update, context, meeting_id, course)
 
 
 @_guard("authorized", conv=True)
@@ -260,11 +263,11 @@ async def handle_zoom_instance_callback(update: Update, context: ContextTypes.DE
     course = context.user_data["zoom_course"]
     await query.edit_message_text(
         f"📹 Instance selected: `{selected.get('start_time', 'Unknown')}`\n\n"
-        f"Processing attendance for {course.upper()}...",
+        f"Proceeding to session type selection...",
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    return await _process_zoom_attendance(update, context)
+    return await _handle_session_type(update, context)
 
 
 @_guard("authorized", conv=True)
@@ -314,11 +317,11 @@ async def handle_zoom_reprocess_callback(update: Update, context: ContextTypes.D
     await query.edit_message_text(
         f"📹 Reprocessing: `{filename}`\n\n"
         f"Meeting ID: `{meeting_id}` · Course: `{course.upper()}` · Date: `{date.strftime('%Y-%m-%d')}`\n\n"
-        f"Processing attendance...",
+        f"Proceeding to session type selection...",
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    return await _process_zoom_attendance(update, context)
+    return await _handle_session_type(update, context)
 
 
 # ─── Date / Teacher time input ─────────────────────────────────────────────────
@@ -376,6 +379,16 @@ async def _handle_session_type(update: Update, context: ContextTypes.DEFAULT_TYP
         return ZOOM_PICK_TYPE
 
     context.user_data["zoom_session_type"] = session_type
+
+    # Ask for session number if not already set
+    if "zoom_session_num" not in context.user_data:
+        await update.message.reply_text(
+            f"📹 Session type: `{session_type}`\n\n"
+            f"Enter the session number (e.g., `1` for Session 1):",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ZOOM_SESSION_NUM
+
     return await _process_zoom_attendance(update, context)
 
 
@@ -396,11 +409,11 @@ async def handle_zoom_type_callback(update: Update, context: ContextTypes.DEFAUL
 
     await query.edit_message_text(
         f"📹 Session type: `{session_type}`\n\n"
-        f"Processing attendance...",
+        f"Enter the session number (e.g., `1` for Session 1):",
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    return await _process_zoom_attendance(update, context)
+    return ZOOM_SESSION_NUM
 
 
 # ─── CSV file upload handler ─────────────────────────────────────────────────
@@ -478,9 +491,8 @@ async def _process_zoom_attendance(update: Update, context: ContextTypes.DEFAULT
         course = context.user_data["zoom_course"]
         source_type = context.user_data.get("zoom_source_type", "api")
 
-        # Get session number (default to next session for this course)
-        # This is a simplification - in production, you'd want to query the sheet
-        session_num = 1  # TODO: Determine from sheet
+        # Get session number from user_data or default to 1
+        session_num = context.user_data.get("zoom_session_num", 1)
 
         session_type = context.user_data.get("zoom_session_type")
 
@@ -554,6 +566,26 @@ async def _process_zoom_attendance(update: Update, context: ContextTypes.DEFAULT
 
 
 @_guard("authorized", conv=True)
+async def handle_zoom_session_num_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User entered session number."""
+    text = update.message.text.strip()
+
+    try:
+        session_num = int(text)
+        if session_num < 1:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Please enter a valid session number (e.g., `1`, `2`, `3`...).",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ZOOM_SESSION_NUM
+
+    context.user_data["zoom_session_num"] = session_num
+    return await _process_zoom_attendance(update, context)
+
+
+@_guard("authorized", conv=True)
 async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """User confirmed or cancelled the dry-run preview."""
     text = update.message.text.strip().upper()
@@ -574,7 +606,7 @@ async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT
     try:
         source = context.user_data["zoom_source"]
         course = context.user_data["zoom_course"]
-        session_num = 1  # TODO: Determine from sheet
+        session_num = context.user_data.get("zoom_session_num", 1)
         session_type = context.user_data.get("zoom_session_type")
         summary = context.user_data["zoom_summary"]
 

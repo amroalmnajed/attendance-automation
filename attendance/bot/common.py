@@ -76,7 +76,10 @@ ZOOM_PICK_TYPE = 10    # waiting for session type selection
 ZOOM_TEACHER_TIME = 11 # waiting for manual meeting start time
 
 
-ZOOM_CONFIRM = 12     # waiting for CONFIRM/CANCEL decision
+ZOOM_SESSION_NUM = 12  # waiting for session number input
+
+
+ZOOM_CONFIRM = 13     # waiting for CONFIRM/CANCEL decision
 
 
 def _load_cfg(path: str = "config/attendance.yaml") -> dict:
