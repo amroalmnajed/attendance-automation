@@ -174,13 +174,8 @@ async def _handle_instances_or_date(
     source_type = context.user_data.get("zoom_source_type", "api")
 
     if source_type == "csv":
-        # CSV upload - ask for date
-        await update.message.reply_text(
-            f"📹 Meeting ID: `{meeting_id}` · Course: `{course.upper()}`\n\n"
-            f"Enter the meeting date (format: `YYYY-MM-DD`, e.g., `2026-09-13`):",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        return ZOOM_TEACHER_TIME
+        # CSV upload - skip date prompt (already extracted from filename)
+        return await _handle_session_type(update, context)
 
     if source_type == "api":
         # List instances for recurring meetings
@@ -190,7 +185,7 @@ async def _handle_instances_or_date(
             )
             if len(instances) == 0:
                 # No instances found — ask the user for the date so we can still proceed
-                await update.message.reply_text(
+                await update.effective_message.reply_text(
                     f"⚠️ No recent meeting instances found for `{meeting_id}`.\n\n"
                     f"Enter the meeting date manually (format: `YYYY-MM-DD`, e.g., `{datetime.now().strftime('%Y-%m-%d')}`):",
                     parse_mode=ParseMode.MARKDOWN,
@@ -206,7 +201,7 @@ async def _handle_instances_or_date(
 
                 # If there were multiple instances, inform the user which one was auto-selected
                 if len(instances) > 1:
-                    await update.message.reply_text(
+                    await update.effective_message.reply_text(
                         f"📹 Meeting ID: `{meeting_id}`\n\n"
                         f"Found {len(instances)} instances. Auto-selected the most recent:\n"
                         f"`{inst.get('start_time', 'Unknown')}`\n\n"
@@ -219,7 +214,7 @@ async def _handle_instances_or_date(
             log.warning("zoom_instances_failed", extra={"error": str(e), "meeting_id": meeting_id})
             error_msg = str(e)
             # Don't end — fall back to asking for date
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"⚠️ Could not fetch meeting instances: {error_msg}\n\n"
                 f"Enter the meeting date manually (format: `YYYY-MM-DD`, e.g., `{datetime.now().strftime('%Y-%m-%d')}`):",
                 parse_mode=ParseMode.MARKDOWN,
@@ -240,7 +235,9 @@ async def handle_zoom_course_callback(update: Update, context: ContextTypes.DEFA
     meeting_id = context.user_data["zoom_meeting_id"]
 
     context.user_data["zoom_course"] = course
-    context.user_data["zoom_source_type"] = "api"
+    # Only set to "api" if not already set (e.g., by CSV upload flow)
+    if "zoom_source_type" not in context.user_data:
+        context.user_data["zoom_source_type"] = "api"
 
     return await _handle_instances_or_date(update, context, meeting_id, course)
 
@@ -371,7 +368,7 @@ async def _handle_session_type(update: Update, context: ContextTypes.DEFAULT_TYP
             kb.append([InlineKeyboardButton(t, callback_data=f"zoom|type|{i}")])
         context.user_data["zoom_type_list"] = online_types
 
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"📹 Multiple Online session types match this date.\n\n"
             f"Please select the correct type:",
             reply_markup=InlineKeyboardMarkup(kb),
@@ -388,7 +385,7 @@ async def _handle_session_type(update: Update, context: ContextTypes.DEFAULT_TYP
         sheet_url = _get_sheet_url(course, cfg)
         sheet_line = f"\n📄 Sheet: [{sheet_url}]({sheet_url})" if sheet_url else ""
 
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"📹 Session type: `{session_type}`{sheet_line}\n\n"
             f"Enter the session number (e.g., `1` for Session 1):",
             parse_mode=ParseMode.MARKDOWN,
@@ -518,7 +515,7 @@ async def _process_zoom_attendance(update: Update, context: ContextTypes.DEFAULT
             }
 
         # Run dry-run
-        status_msg = await update.message.reply_text("🔍 Processing attendance (dry-run)...")
+        status_msg = await update.effective_message.reply_text("🔍 Processing attendance (dry-run)...")
 
         def run_dry():
             return run_zoom(
@@ -576,11 +573,11 @@ async def _process_zoom_attendance(update: Update, context: ContextTypes.DEFAULT
         return ZOOM_CONFIRM
 
     except _StaleSession:
-        await update.message.reply_text("⚠️ Session expired. Please start over with /zoom_fetch or /zoom_upload.")
+        await update.effective_message.reply_text("⚠️ Session expired. Please start over with /zoom_fetch or /zoom_upload.")
         return ConversationHandler.END
     except Exception as e:
         log.error("zoom_process_error", extra={"error": str(e)}, exc_info=True)
-        await update.message.reply_text(_user_error_message(e, "Zoom attendance"))
+        await update.effective_message.reply_text(_user_error_message(e, "Zoom attendance"))
         return ConversationHandler.END
 
 
@@ -610,12 +607,12 @@ async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT
     text = update.message.text.strip().upper()
 
     if text == "CANCEL":
-        await update.message.reply_text("❌ Cancelled. No changes were made.")
+        await update.effective_message.reply_text("❌ Cancelled. No changes were made.")
         context.user_data.clear()
         return ConversationHandler.END
 
     if text != "CONFIRM":
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "❌ Please reply `CONFIRM` to write, or `CANCEL` to discard.",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -629,7 +626,7 @@ async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT
         session_type = context.user_data.get("zoom_session_type")
         summary = context.user_data["zoom_summary"]
 
-        status_msg = await update.message.reply_text("✍️ Writing to sheet...")
+        status_msg = await update.effective_message.reply_text("✍️ Writing to sheet...")
 
         def run_write():
             return run_zoom(
@@ -659,5 +656,5 @@ async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT
 
     except Exception as e:
         log.error("zoom_write_error", extra={"error": str(e)}, exc_info=True)
-        await update.message.reply_text(_user_error_message(e, "Zoom attendance write"))
+        await update.effective_message.reply_text(_user_error_message(e, "Zoom attendance write"))
         return ConversationHandler.END
