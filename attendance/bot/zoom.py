@@ -225,7 +225,20 @@ async def handle_zoom_course_callback(update: Update, context: ContextTypes.DEFA
     context.user_data["zoom_course"] = course
     context.user_data["zoom_source_type"] = "api"
 
-    return await _handle_instances_or_date(update, context, meeting_id, course)
+    try:
+        return await _handle_instances_or_date(update, context, meeting_id, course)
+    except Exception as e:
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            await query.edit_message_text(
+                f"⚠️ Meeting not found or hasn't happened yet.\n\n"
+                f"Please try again with a different meeting ID."
+            )
+        else:
+            await query.edit_message_text(
+                f"⚠️ Error: {error_msg}"
+            )
+        return ConversationHandler.END
 
 
 @_guard("authorized", conv=True)
