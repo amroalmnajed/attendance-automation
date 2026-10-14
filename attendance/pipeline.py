@@ -376,7 +376,7 @@ def run_zoom(
 
     Source can be:
     - Local CSV file path (str)
-    - Dict with meeting_id, instance_uuid, date (from Zoom API)
+    - Dict with meeting_id, date (from Zoom API) - instance_uuid is not used
 
     Returns RunSummary with teacher_not_found flag if teacher detection fails.
     """
@@ -410,11 +410,10 @@ def run_zoom(
         else:
             # Zoom API data
             meeting_id = source.get("meeting_id")
-            instance_uuid = source.get("instance_uuid")
             date_str = source.get("date")
             participants = fetch_past_meeting_participants(
                 meeting_id=meeting_id,
-                instance_uuid=instance_uuid,
+                instance_uuid=None,  # Not used - Zoom API doesn't support instance-specific endpoint
                 config=zoom_cfg.get("zoom_api", {}),
             )
             date = datetime.fromisoformat(date_str) if date_str else None
