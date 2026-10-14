@@ -110,7 +110,7 @@ async def handle_zoom_meeting_id_text(update: Update, context: ContextTypes.DEFA
     text = update.message.text.strip()
     cfg = _load_cfg()
     zoom_cfg = cfg.get("attendance", {}).get("zoom_csv", {})
-    mappings = zoom_cfg.get("meeting_id_mappings", {})
+    mappings = zoom_cfg.get("meeting_id_mappings") or {}
 
     # Check if it's a course nickname
     if text.lower() in COURSES:
@@ -276,7 +276,7 @@ async def handle_zoom_reprocess_callback(update: Update, context: ContextTypes.D
         return ConversationHandler.END
 
     # Look up course from mappings
-    mappings = zoom_cfg.get("meeting_id_mappings", {})
+    mappings = zoom_cfg.get("meeting_id_mappings") or {}
     course = mappings.get(meeting_id)
 
     if not course:
@@ -422,7 +422,7 @@ async def handle_zoom_csv_upload(update: Update, context: ContextTypes.DEFAULT_T
     # Look up course from mappings
     cfg = _load_cfg()
     zoom_cfg = cfg.get("attendance", {}).get("zoom_csv", {})
-    mappings = zoom_cfg.get("meeting_id_mappings", {})
+    mappings = zoom_cfg.get("meeting_id_mappings") or {}
     course = mappings.get(meeting_id)
 
     if not course:

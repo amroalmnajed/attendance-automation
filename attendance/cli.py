@@ -181,7 +181,7 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         # Look up course from mappings
-        mappings = zoom_cfg.get("meeting_id_mappings", {})
+        mappings = zoom_cfg.get("meeting_id_mappings") or {}
         course = mappings.get(meeting_id)
 
         if not course:
@@ -282,7 +282,7 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
         print(f"  Detected: Meeting ID={meeting_id}, Date={date_str}")
 
         # Look up course
-        mappings = zoom_cfg.get("meeting_id_mappings", {})
+        mappings = zoom_cfg.get("meeting_id_mappings") or {}
         course = mappings.get(meeting_id)
 
         if not course:
@@ -612,7 +612,7 @@ def cmd_process_text(args: argparse.Namespace) -> None:
         print(f"  Detected: Meeting ID={meeting_id}, Date={date_str}")
 
         # Look up course
-        mappings = zoom_cfg.get("meeting_id_mappings", {})
+        mappings = zoom_cfg.get("meeting_id_mappings") or {}
         course = mappings.get(meeting_id)
 
         if not course:
