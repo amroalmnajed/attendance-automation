@@ -44,7 +44,8 @@ Fetch participant reports directly from Zoom using the Server-to-Server OAuth ap
 
 **Zoom App Setup:**
 1. Go to [Zoom Marketplace](https://marketplace.zoom.us/) and create a Server-to-Server OAuth app
-2. Required scope: `report:read:admin` (for accessing participant reports)
+2. Required scope: `meeting:read:list_past_participants` or `meeting:read:list_past_participants:admin` (for accessing participant reports)
+   - **Important:** Make sure to add this scope in the Zoom app settings under "Scopes" → "Add Scopes" → "Meeting" → check the participant read scope
 3. Copy the Account ID, Client ID, and Client Secret from the app credentials
 4. Store these as Railway environment variables:
    - `ZOOM_ACCOUNT_ID` - Your Zoom account ID
