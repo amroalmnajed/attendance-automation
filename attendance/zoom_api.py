@@ -102,6 +102,8 @@ def fetch_past_meeting_participants(
     Args:
         meeting_id: Zoom meeting ID
         instance_uuid: Optional UUID for specific instance (for recurring meetings)
+                       NOTE: Zoom API doesn't support instance-specific participant endpoint,
+                       so this parameter is ignored. The API returns participants for the meeting.
         config: Zoom API configuration dict
 
     Returns:
@@ -124,13 +126,10 @@ def fetch_past_meeting_participants(
         "Content-Type": "application/json",
     }
 
-    # Build endpoint URL
-    if instance_uuid:
-        url = f"{api_base}/past_meetings/{meeting_id}/instances/{instance_uuid}/participants"
-        log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "instance_uuid": instance_uuid, "url": url})
-    else:
-        url = f"{api_base}/past_meetings/{meeting_id}/participants"
-        log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "url": url})
+    # Use the simple endpoint without instance UUID
+    # Zoom's /instances/{uuid}/participants endpoint returns 404, but /participants works
+    url = f"{api_base}/past_meetings/{meeting_id}/participants"
+    log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "url": url})
 
     try:
         response = httpx.get(url, headers=headers, timeout=30)
@@ -162,13 +161,12 @@ def fetch_past_meeting_participants(
             "status": e.response.status_code,
             "text": response_text,
             "url": url,
-            "instance_uuid": instance_uuid
         })
         if e.response.status_code == 404:
             raise RuntimeError(f"Meeting not found: {meeting_id}") from e
         elif e.response.status_code == 400:
             # Report not ready yet or invalid request
-            raise RuntimeError(f"Participant report error (400): {response_text[:200]}. This may be due to invalid instance UUID or API limitations. Try CSV upload instead.") from e
+            raise RuntimeError(f"Participant report error (400): {response_text[:200]}. This may be due to API limitations. Try CSV upload instead.") from e
         else:
             raise RuntimeError(f"Zoom API failed: {e.response.status_code} - {response_text[:200]}") from e
     except Exception as e:
