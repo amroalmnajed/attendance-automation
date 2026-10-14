@@ -194,15 +194,21 @@ async def _handle_instances_or_date(
                 return ZOOM_PICK_INSTANCE
         except Exception as e:
             log.warning("zoom_instances_failed", extra={"error": str(e), "meeting_id": meeting_id})
-            # Fall through to ask for date
-
-    # Ask for date (used for both API and CSV)
-    await update.message.reply_text(
-        f"📹 Meeting ID: `{meeting_id}` · Course: `{course.upper()}`\n\n"
-        f"Enter the meeting date (format: `YYYY-MM-DD`, e.g., `2026-09-13`):",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-    return ZOOM_TEACHER_TIME
+            # Show error to user and fall through to ask for date
+            error_msg = str(e)
+            if "not found" in error_msg.lower():
+                await update.message.reply_text(
+                    f"⚠️ Meeting not found or hasn't happened yet.\n\n"
+                    f"Please enter the meeting date (format: `YYYY-MM-DD`, e.g., `2026-09-13`):",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            else:
+                await update.message.reply_text(
+                    f"⚠️ Could not fetch meeting instances: {error_msg}\n\n"
+                    f"Please enter the meeting date (format: `YYYY-MM-DD`, e.g., `2026-09-13`):",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            return ZOOM_TEACHER_TIME
 
 
 # ─── Callback handlers ───────────────────────────────────────────────────────
