@@ -195,27 +195,24 @@ async def _handle_instances_or_date(
                     parse_mode=ParseMode.MARKDOWN,
                 )
                 return ConversationHandler.END
-            elif len(instances) == 1:
-                # Single instance - use it directly
-                inst = instances[0]
+            elif len(instances) >= 1:
+                # Sort instances by start_time (most recent first) and use the most recent
+                instances_sorted = sorted(instances, key=lambda x: x.get("start_time", ""), reverse=True)
+                inst = instances_sorted[0]
                 context.user_data["zoom_instance_uuid"] = inst.get("uuid")
                 context.user_data["zoom_date"] = inst.get("start_time", "")
-                return await _handle_session_type(update, context)
-            elif len(instances) > 1:
-                # Build keyboard with instances
-                kb = []
-                for i, inst in enumerate(instances[:10]):
-                    start_time = inst.get("start_time", "Unknown")
-                    kb.append([InlineKeyboardButton(f"Instance {i+1}: {start_time}", callback_data=f"zoom|instance|{i}")])
-                context.user_data["zoom_instances"] = instances
 
-                await update.message.reply_text(
-                    f"📹 Meeting ID: `{meeting_id}`\n\n"
-                    f"Found {len(instances)} instances. Select one:",
-                    reply_markup=InlineKeyboardMarkup(kb),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                return ZOOM_PICK_INSTANCE
+                # If there were multiple instances, inform the user which one was auto-selected
+                if len(instances) > 1:
+                    await update.message.reply_text(
+                        f"📹 Meeting ID: `{meeting_id}`\n\n"
+                        f"Found {len(instances)} instances. Auto-selected the most recent:\n"
+                        f"`{inst.get('start_time', 'Unknown')}`\n\n"
+                        f"Proceeding to session type selection...",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+
+                return await _handle_session_type(update, context)
         except Exception as e:
             log.warning("zoom_instances_failed", extra={"error": str(e), "meeting_id": meeting_id})
             error_msg = str(e)

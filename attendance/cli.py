@@ -196,24 +196,18 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
         # Check for instances (recurring meetings)
         try:
             instances = list_recent_meeting_instances(meeting_id, zoom_cfg.get("zoom_api", {}))
-            if len(instances) > 1:
-                print(f"\n  Found {len(instances)} instances:")
-                for i, inst in enumerate(instances[:10], 1):
-                    start_time = inst.get("start_time", "Unknown")
-                    print(f"    {i}. {start_time}")
+            if len(instances) >= 1:
+                # Sort by start_time (most recent first) and auto-select the most recent
+                instances_sorted = sorted(instances, key=lambda x: x.get("start_time", ""), reverse=True)
+                selected = instances_sorted[0]
+                instance_uuid = selected.get("uuid")
+                date_str = selected.get("start_time", "")
 
-                while True:
-                    try:
-                        choice = int(_ask("\nSelect instance number: "))
-                        if 1 <= choice <= len(instances):
-                            selected = instances[choice - 1]
-                            instance_uuid = selected.get("uuid")
-                            date_str = selected.get("start_time", "")
-                            print(f"  Selected: {date_str}")
-                            break
-                        print(f"  [!] Please enter a number between 1 and {len(instances)}")
-                    except ValueError:
-                        print("  [!] Please enter a valid number.")
+                if len(instances) > 1:
+                    print(f"\n  Found {len(instances)} instances.")
+                    print(f"  Auto-selected the most recent: {date_str}")
+                else:
+                    print(f"\n  Found 1 instance: {date_str}")
             else:
                 instance_uuid = None
                 date_str = None
