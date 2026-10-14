@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import threading
 import time
@@ -232,3 +233,17 @@ def _input_settings() -> dict:
         "max_photos": max(1, int(multi.get("max_photos", 6))),
         "append_window_s": float(multi.get("append_window_s", 120)),
     }
+
+
+def _get_sheet_url(course: str, cfg: dict) -> str:
+    """Get the Google Sheet URL for a course."""
+    course_cfg = cfg["attendance"]["courses"].get(course, {})
+    sheet_id_env = course_cfg.get("sheet_id_env")
+    if not sheet_id_env:
+        return ""
+
+    sheet_id = os.environ.get(sheet_id_env)
+    if not sheet_id:
+        return ""
+
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}"

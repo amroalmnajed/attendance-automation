@@ -23,6 +23,7 @@ from attendance.bot.common import (
     PIPELINE_TIMEOUT_S,
     STAGE_TEXT,
     _course_keyboard,
+    _get_sheet_url,
     _guard,
     _input_settings,
     _load_cfg,
@@ -195,7 +196,12 @@ async def _send_upload_menu(message, context, edit: bool = False):
     ]
     n_photos = len(context.user_data.get("image_paths") or [])
     photos_line = f"📷 {n_photos} photos in this upload\n" if n_photos > 1 else ""
-    text = f"📋 *New Attendance Upload*\n{photos_line}Please confirm the details:"
+
+    cfg = _load_cfg()
+    sheet_url = _get_sheet_url(c, cfg)
+    sheet_line = f"📄 Sheet: [{sheet_url}]({sheet_url})\n" if sheet_url else ""
+
+    text = f"📋 *New Attendance Upload*\n{photos_line}{sheet_line}Please confirm the details:"
 
     if edit:
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)

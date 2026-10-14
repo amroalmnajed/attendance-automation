@@ -15,6 +15,7 @@ from attendance.bot.common import (
     NAMES_TYPE,
     _StaleSession,
     _course_type_list,
+    _get_sheet_url,
     _guard,
     _input_settings,
     _load_cfg,
@@ -43,8 +44,11 @@ async def handle_names_course_callback(update: Update, context: ContextTypes.DEF
     needs_type = cfg["attendance"]["courses"].get(course, {}).get("layout") == "typed_pair"
     context.user_data["nc_needs_type"] = needs_type
 
+    sheet_url = _get_sheet_url(course, cfg)
+    sheet_line = f"\n📄 Sheet: [{sheet_url}]({sheet_url})" if sheet_url else ""
+
     await query.edit_message_text(
-        f"📋 Course: *{course.upper()}*\n\nStep 2 of {'3' if needs_type else '3'} — Enter the session number (e.g. `5`):",
+        f"📋 Course: *{course.upper()}*{sheet_line}\n\nStep 2 of {'3' if needs_type else '3'} — Enter the session number (e.g. `5`):",
         parse_mode=ParseMode.MARKDOWN,
     )
     return NAMES_SESSION
@@ -79,8 +83,11 @@ async def handle_names_session_text(update: Update, context: ContextTypes.DEFAUL
             kb.append([InlineKeyboardButton(t, callback_data=f"nc|type|{i}")])
         context.user_data["nc_type_list"] = all_types
 
+        sheet_url = _get_sheet_url(course, cfg)
+        sheet_line = f"\n📄 Sheet: [{sheet_url}]({sheet_url})" if sheet_url else ""
+
         await update.message.reply_text(
-            f"📋 Course: *{course.upper()}* · Session: *S{session}*\n\nStep 3 of 3 — Pick the session type:",
+            f"📋 Course: *{course.upper()}* · Session: *S{session}*{sheet_line}\n\nStep 3 of 3 — Pick the session type:",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode=ParseMode.MARKDOWN,
         )

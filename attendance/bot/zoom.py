@@ -31,6 +31,7 @@ from attendance.bot.common import (
     ZOOM_TEACHER_TIME,
     _StaleSession,
     _course_type_list,
+    _get_sheet_url,
     _guard,
     _load_cfg,
     _run_blocking,
@@ -379,8 +380,13 @@ async def _handle_session_type(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Ask for session number if not already set
     if "zoom_session_num" not in context.user_data:
+        course = context.user_data["zoom_course"]
+        cfg = _load_cfg()
+        sheet_url = _get_sheet_url(course, cfg)
+        sheet_line = f"\n📄 Sheet: [{sheet_url}]({sheet_url})" if sheet_url else ""
+
         await update.message.reply_text(
-            f"📹 Session type: `{session_type}`\n\n"
+            f"📹 Session type: `{session_type}`{sheet_line}\n\n"
             f"Enter the session number (e.g., `1` for Session 1):",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -404,8 +410,13 @@ async def handle_zoom_type_callback(update: Update, context: ContextTypes.DEFAUL
     session_type = type_list[idx]
     context.user_data["zoom_session_type"] = session_type
 
+    course = context.user_data["zoom_course"]
+    cfg = _load_cfg()
+    sheet_url = _get_sheet_url(course, cfg)
+    sheet_line = f"\n📄 Sheet: [{sheet_url}]({sheet_url})" if sheet_url else ""
+
     await query.edit_message_text(
-        f"📹 Session type: `{session_type}`\n\n"
+        f"📹 Session type: `{session_type}`{sheet_line}\n\n"
         f"Enter the session number (e.g., `1` for Session 1):",
         parse_mode=ParseMode.MARKDOWN,
     )
