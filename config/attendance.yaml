@@ -203,6 +203,24 @@ attendance:
       token_url: "https://zoom.us/oauth/token"
       api_base_url: "https://api.zoom.us/v2"
 
+    # Matcher overrides for the Zoom path only.
+    # Zoom display names are self-typed (confidence=1.0) but are typically shorter than
+    # full roster names (e.g. "Adam Wafa" vs "Adam Mohammed Wafa"), so the fuzzy score
+    # ceiling is ~85–88 even for an obvious match.  We relax t_high and add a soft-accept
+    # lane for clear winners that fall just below the primary threshold.
+    #
+    # Primary lane:  score >= t_high (80) AND margin >= margin (8)
+    # Soft lane:     score >= t_soft (68) AND margin >= margin_strong (22)
+    #                — catches partial-name matches like "Omar Morad" → roster row
+    #
+    # These values were calibrated against the G10/CRASH/MAIN production logs.
+    # Run  python tests/eval_matcher.py  to verify FAR stays at 0% before changing them.
+    match_overrides:
+      t_high: 76       # Zoom names are self-typed; relax from the OCR default of 90
+      margin: 8        # slightly relaxed from 10
+      t_soft: 68       # soft-accept lane for partial names (e.g. "Omar Morad")
+      margin_strong: 20  # soft lane requires a bigger lead to compensate for lower score
+
   # Canonical attendance values — these are compared (case-insensitively) against live dropdowns.
   attendance_values:
     Present: Present

@@ -30,6 +30,7 @@ from attendance.zoom_api import fetch_past_meeting_participants
 from attendance.zoom_csv import (
     archive_csv,
     calculate_attendance,
+    clean_zoom_name,
     determine_session_type,
     extract_date_from_filename,
     extract_meeting_id_from_filename,
@@ -455,15 +456,22 @@ def run_zoom(
         summary.errors.append("Attendance calculation failed (teacher not found)")
         return summary
 
-    # Convert to OcrRow format for existing pipeline
+    # Convert to OcrRow format for existing pipeline.
+    # Clean Zoom display-name artefacts (parenthetical suffixes, bilingual Arabic tails)
+    # before fuzzy matching — raw Zoom names hurt scores dramatically.
     ocr_rows = []
     for name, mark, detail in attendance_results:
         ocr_rows.append(OcrRow(
-            raw_name=name,
+            raw_name=clean_zoom_name(name),
             status_mark=mark,
             confidence=1.0,
             row_index=len(ocr_rows) + 1,
         ))
+
+    # Build Zoom-specific matcher overrides: Zoom names are self-typed (reliable) but
+    # are often partial (first + last only) so the raw fuzzy score ceiling is ~85–88
+    # against a 3-4 token roster name.  We relax t_high and add a soft-accept lane.
+    zoom_match_overrides: dict = zoom_cfg.get("match_overrides", {})
 
     # Process through existing pipeline
     result = _process_rows(
@@ -479,6 +487,7 @@ def run_zoom(
         image_path="zoom_source",
         review_store_dir=review_store_dir,
         summary=summary,
+        match_cfg_overrides=zoom_match_overrides,
     )
 
     # Post-processing for non-dry-run
@@ -526,9 +535,12 @@ def _process_rows(
     summary: RunSummary,
     session_info: Optional[SheetSession] = None,
     progress: Optional[ProgressFn] = None,
+    match_cfg_overrides: Optional[dict] = None,
 ) -> RunSummary:
     att_cfg = cfg["attendance"]
-    match_cfg = att_cfg["match"]
+    # Allow callers (e.g. the Zoom path) to override specific matcher knobs without
+    # touching the global config.  Overrides are merged on top of the base config.
+    match_cfg = {**att_cfg["match"], **(match_cfg_overrides or {})}
     write_cfg = att_cfg["write"]
 
     if session_info is None:

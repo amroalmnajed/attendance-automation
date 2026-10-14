@@ -22,6 +22,35 @@ from core.logger import get_logger
 log = get_logger("zoom_csv")
 
 
+# ─── Zoom display-name cleaner ────────────────────────────────────────────────
+
+# Matches bilingual "English Name -- Arabic Name" or "English Name - Arabic Name" where the
+# second part contains Arabic script.  We keep only the English half.
+_BILINGUAL_SEP = re.compile(r'\s*[-–—]{1,3}\s*[؀-ۿ]')
+
+# Matches anything inside parentheses or brackets — Zoom users append room codes,
+# device aliases, e.g. "Omar Morad (Omar Morad e116)" or "Ahmed [iPad]".
+_PAREN_OR_BRACKET = re.compile(r'\s*[\(\[][^\)\]]*[\)\]]')
+
+
+def clean_zoom_name(name: str) -> str:
+    """Strip Zoom display-name artefacts that hurt fuzzy matching.
+
+    Handles three common patterns seen in practice:
+    1. Bilingual suffix:  "Ahmed Idris -- أحمد إدريس"  →  "Ahmed Idris"
+    2. Parenthetical:     "Omar Morad (Omar Morad e116)"  →  "Omar Morad"
+    3. Bracket alias:     "Ahmed [iPad]"  →  "Ahmed"
+
+    The original name is returned unchanged if none of these patterns are present,
+    so calling this on a clean name is always safe.
+    """
+    # Strip Arabic / bilingual suffix first (may itself contain brackets)
+    cleaned = _BILINGUAL_SEP.split(name, maxsplit=1)[0]
+    # Strip parenthetical / bracket groups
+    cleaned = _PAREN_OR_BRACKET.sub('', cleaned)
+    return cleaned.strip()
+
+
 # ─── CSV parsing ───────────────────────────────────────────────────────────────
 
 def parse_zoom_csv(file_path: str) -> list[dict[str, Any]]:
