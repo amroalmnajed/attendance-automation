@@ -179,7 +179,10 @@ attendance:
   zoom_csv:
     enabled: true
     meeting_id_mappings:
-      # Example: 81795786552: g10
+      81795786552: main
+      83570905451: g10
+      81887392957: crash
+      82572049402: g9
     teacher_name: "Yaman"
     teacher_fuzzy_match_threshold: 80
     teacher_join_buffer_minutes: 5
