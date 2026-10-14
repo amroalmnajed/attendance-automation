@@ -7,9 +7,9 @@ from attendance.bot import app as bot_app
 from attendance.bot import menu
 from tests.botutil import patch_bot
 
-CFG = {"attendance": {"admin": {"telegram_ids": [1, 3]}, "teacher": {"telegram_ids": [2]}}}
+CFG = {"attendance": {"authorized": {"telegram_ids": [1, 2, 3]}}}
 TEACHER_CMDS = ["start", "upload", "done", "cancel", "revert", "help"]
-ADMIN_EXTRA = ["report", "streaks", "pending", "aliases", "health"]
+ADMIN_EXTRA = ["report", "streaks", "pending", "aliases", "health", "zoom_fetch", "zoom_upload", "zoom_reprocess"]
 
 
 def test_commands_follow_telegram_rules():
@@ -17,20 +17,20 @@ def test_commands_follow_telegram_rules():
     assert len(names) == len(set(names))
     for c, d, lvl in menu.COMMANDS:
         assert re.fullmatch(r"[a-z0-9_]{1,32}", c) and 1 <= len(d) <= 256
-        assert lvl in ("teacher", "admin", "strict_admin")
+        assert lvl in ("authorized",)
 
 
 def test_teacher_and_admin_menus():
-    assert [c for c, _ in menu.commands_for_level(admin=False)] == TEACHER_CMDS
-    assert [c for c, _ in menu.commands_for_level(admin=True)] == TEACHER_CMDS + ADMIN_EXTRA
+    all_cmds = TEACHER_CMDS + ADMIN_EXTRA
+    assert [c for c, _ in menu.commands_for_level()] == all_cmds
 
 
 def test_help_lists_only_what_the_caller_may_use():
-    t = [c for c, _ in menu.allowed_commands(2, CFG)]
+    all_cmds = TEACHER_CMDS + ADMIN_EXTRA
     a = [c for c, _ in menu.allowed_commands(1, CFG)]
-    assert t == TEACHER_CMDS and a == TEACHER_CMDS + ADMIN_EXTRA
+    assert a == all_cmds
     assert menu.allowed_commands(999, CFG) == []
-    assert "/report" not in menu.help_text(2, CFG) and "/report" in menu.help_text(1, CFG)
+    assert "/report" in menu.help_text(1, CFG)
     assert menu.help_text(999, CFG) == "You don't have access to this bot."
 
 
@@ -70,15 +70,14 @@ def test_post_init_sets_default_and_per_admin_menus(monkeypatch):
     patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: CFG)
     bot = _Bot()
     asyncio.run(menu.post_init(SimpleNamespace(bot=bot)))
-    assert bot.calls[0] == (TEACHER_CMDS, None)
-    assert bot.calls[1:] == [(TEACHER_CMDS + ADMIN_EXTRA, 1), (TEACHER_CMDS + ADMIN_EXTRA, 3)]
+    all_cmds = TEACHER_CMDS + ADMIN_EXTRA
+    assert bot.calls[0] == (all_cmds, None)
 
 
 def test_post_init_failures_never_raise(monkeypatch):
     patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: CFG)
     bot = _Bot(fail_for=1)
     asyncio.run(menu.post_init(SimpleNamespace(bot=bot)))
-    assert (TEACHER_CMDS + ADMIN_EXTRA, 3) in bot.calls          # one bad admin chat doesn't block the next
     patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
     asyncio.run(menu.post_init(SimpleNamespace(bot=_Bot())))
 
@@ -94,9 +93,9 @@ def _update(uid):
 
 def test_cmd_help_replies_by_role_and_refuses_strangers(monkeypatch):
     patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: CFG)
-    upd, out = _update(2)
+    upd, out = _update(1)
     asyncio.run(menu.cmd_help(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
-    assert "/revert" in out[0] and "/health" not in out[0]
+    assert "/revert" in out[0] and "/health" in out[0]
     upd, out = _update(999)
     asyncio.run(menu.cmd_help(upd, SimpleNamespace(bot=None, user_data={}, args=[])))
-    assert "/revert" not in out[0]
+    assert "not authorised" in out[0]

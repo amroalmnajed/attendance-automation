@@ -18,7 +18,7 @@ def cfg_for(tmp_path, **over):
     r.update(over)
     return {"core": {"app": {"timezone": "Africa/Cairo"}},
             "attendance": {"review": {"local_dir": str(tmp_path / "rq")}, "reminders": r,
-                           "admin": {"telegram_ids": [1]}, "teacher": {"telegram_ids": [2]}}}
+                           "authorized": {"telegram_ids": [1, 2]}}}
 
 
 def at(y, mo, d, h, mi):
@@ -107,8 +107,8 @@ def test_message_has_course_and_time_only():
 
 
 def test_recipients_follow_the_setting(tmp_path):
-    assert rem.recipients(cfg_for(tmp_path, recipients="admin"), {}) == [1]
-    assert rem.recipients(cfg_for(tmp_path, recipients="teacher"), {}) == [2]
+    assert rem.recipients(cfg_for(tmp_path, recipients="admin"), {}) == [1, 2]
+    assert rem.recipients(cfg_for(tmp_path, recipients="teacher"), {}) == [1, 2]
     assert rem.recipients(cfg_for(tmp_path, recipients="both"), {}) == [1, 2]
     assert rem.recipients(cfg_for(tmp_path, recipients="nonsense"), {}) == [1, 2]
 
@@ -142,7 +142,7 @@ def test_failed_send_is_retried_not_forgotten(tmp_path):
 
 def test_no_recipients_sends_nothing_and_does_not_crash(tmp_path):
     c = cfg_for(tmp_path)
-    c["attendance"]["admin"], c["attendance"]["teacher"] = {}, {}
+    c["attendance"]["authorized"] = {}
     s = Sender()
     assert rem.run_check(c, at(2026, 10, 12, 19, 30), s, {}) == [] and not s.calls
 

@@ -5,6 +5,10 @@ Usage:
   python -m attendance.cli attend
   # Asks: image or paste names? → course → session → type → dry-run → go
 
+  # Zoom attendance wizard:
+  python -m attendance.cli zoom-attend
+  # Asks: CSV upload / API fetch / reprocess archive → meeting ID → course → session → type → dry-run → go
+
   # Process a single photo in dry-run mode (safe, no writes):
   python -m attendance.cli process --image path/to/photo.jpg --course g10 --session 5 --type "Saturday - Center"
 
@@ -19,6 +23,9 @@ Usage:
 
   # Process text file with all args provided (no prompts):
   python -m attendance.cli process-text --text names.txt --course g10 --session 5 --type "Saturday - Center" --no-dry-run
+
+  # Reprocess an archived Zoom CSV:
+  python -m attendance.cli process-text --from-archive
 
   # Each line may carry a mark: "Ahmed Ali | L", "Sara - absent", "Omar, Late"
   # (P/L/A/NC or Present/Late/Absent/Not complete; English or Arabic; no mark = Present)
@@ -43,6 +50,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -98,6 +106,259 @@ def cmd_process(args: argparse.Namespace) -> None:
     notify_cfg = cfg.get("core", {}).get("notify", {})
     send(summary, channel=notify_cfg.get("channel", "log"))
 
+    print(summary.text())
+
+    if summary.flagged > 0:
+        print(f"\n{summary.flagged} item(s) need review. Run:")
+        print(f"  python -m attendance.cli review list\n")
+
+
+# ─── Subcommand: zoom-attend (interactive wizard for Zoom) ────────────────────
+
+def cmd_zoom_attend(args: argparse.Namespace) -> None:
+    """Interactive wizard for Zoom attendance: CSV upload or API fetch."""
+    from attendance.pipeline import run_zoom
+    from attendance.zoom_api import list_recent_meeting_instances
+    from attendance.zoom_csv import extract_date_from_filename, extract_meeting_id_from_filename
+
+    cfg = _load_cfg(args.config)
+    review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
+    zoom_cfg = cfg.get("attendance", {}).get("zoom_csv", {})
+    notify_cfg = cfg.get("core", {}).get("notify", {})
+
+    if not zoom_cfg.get("enabled", False):
+        print("\n[ERROR] Zoom CSV integration is disabled in config.")
+        sys.exit(1)
+
+    print("\n" + "─" * 60)
+    print("  Zoom Attendance Wizard")
+    print("─" * 60)
+
+    # ── Step 1: Source type ───────────────────────────────────────
+    source_mode = _ask(
+        "\nHow do you want to provide Zoom data?\n"
+        "  [c] I have a CSV file to upload\n"
+        "  [a] I want to fetch from Zoom API\n"
+        "  [r] I want to reprocess an archived CSV\n"
+        "Choice (c/a/r): ",
+        choices=["c", "a", "r"],
+    )
+
+    source: str | dict[str, str]
+    meeting_id: str | None = None
+    course: str | None = None
+    date_str: str | None = None
+
+    # ── Step 2: Get source data ────────────────────────────────────
+    if source_mode == "c":
+        # CSV upload
+        csv_path = _ask("\nPath to CSV file: ")
+        if not os.path.exists(csv_path):
+            print(f"\n[ERROR] File not found: {csv_path}", file=sys.stderr)
+            sys.exit(1)
+
+        source = csv_path
+
+        # Extract meeting ID and date from filename
+        filename = Path(csv_path).name
+        meeting_id = extract_meeting_id_from_filename(filename)
+        date = extract_date_from_filename(filename)
+
+        if not meeting_id or not date:
+            print(f"\n[ERROR] Filename doesn't match expected pattern: {filename}")
+            print("Expected: participants_<meeting_id>_<date>.csv")
+            print("Example: participants_81795786552_2026_09_13.csv")
+            sys.exit(1)
+
+        date_str = date.strftime("%Y-%m-%d")
+        print(f"  Detected: Meeting ID={meeting_id}, Date={date_str}")
+
+    elif source_mode == "a":
+        # API fetch
+        meeting_id = _ask("\nZoom meeting ID (numbers only): ")
+        if not meeting_id.isdigit():
+            print("\n[ERROR] Meeting ID must be numbers only.", file=sys.stderr)
+            sys.exit(1)
+
+        # Look up course from mappings
+        mappings = zoom_cfg.get("meeting_id_mappings", {})
+        course = mappings.get(meeting_id)
+
+        if not course:
+            valid_courses = ["crash", "main", "g10", "g9"]
+            course = _ask(
+                f"\nMeeting ID not mapped. Which course is this for ({'/'.join(valid_courses)}): ",
+                choices=valid_courses,
+            )
+        else:
+            print(f"  Mapped to course: {course}")
+
+        # Check for instances (recurring meetings)
+        try:
+            instances = list_recent_meeting_instances(meeting_id, zoom_cfg.get("zoom_api", {}))
+            if len(instances) > 1:
+                print(f"\n  Found {len(instances)} instances:")
+                for i, inst in enumerate(instances[:10], 1):
+                    start_time = inst.get("start_time", "Unknown")
+                    print(f"    {i}. {start_time}")
+
+                while True:
+                    try:
+                        choice = int(_ask("\nSelect instance number: "))
+                        if 1 <= choice <= len(instances):
+                            selected = instances[choice - 1]
+                            instance_uuid = selected.get("uuid")
+                            date_str = selected.get("start_time", "")
+                            print(f"  Selected: {date_str}")
+                            break
+                        print(f"  [!] Please enter a number between 1 and {len(instances)}")
+                    except ValueError:
+                        print("  [!] Please enter a valid number.")
+            else:
+                instance_uuid = None
+                date_str = None
+        except Exception as e:
+            print(f"\n[WARNING] Could not list instances: {e}")
+            print("  Continuing with manual date entry...")
+            instance_uuid = None
+            date_str = None
+
+        if not date_str:
+            date_str = _ask("\nEnter meeting date (YYYY-MM-DD, e.g., 2026-09-13): ")
+            try:
+                datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                print("\n[ERROR] Invalid date format. Use YYYY-MM-DD.", file=sys.stderr)
+                sys.exit(1)
+
+        source = {
+            "meeting_id": meeting_id,
+            "instance_uuid": instance_uuid,
+            "date": date_str,
+        }
+
+    else:  # source_mode == "r"
+        # Reprocess archived CSV
+        archive_folder = zoom_cfg.get("archive_folder", "csv_archive")
+        archive_path = Path(archive_folder)
+
+        if not archive_path.exists():
+            print(f"\n[ERROR] Archive folder not found: {archive_folder}", file=sys.stderr)
+            sys.exit(1)
+
+        csv_files = list(archive_path.glob("*.csv"))
+        if not csv_files:
+            print(f"\n[ERROR] No CSV files found in archive folder: {archive_folder}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"\n  Found {len(csv_files)} archived CSV(s):")
+        for i, csv_file in enumerate(csv_files[:10], 1):
+            print(f"    {i}. {csv_file.name}")
+
+        if len(csv_files) > 10:
+            print(f"    ... and {len(csv_files) - 10} more")
+
+        while True:
+            try:
+                choice = int(_ask("\nSelect CSV number: "))
+                if 1 <= choice <= len(csv_files):
+                    selected = csv_files[choice - 1]
+                    source = str(selected)
+                    break
+                print(f"  [!] Please enter a number between 1 and {len(csv_files)}")
+            except ValueError:
+                print("  [!] Please enter a valid number.")
+
+        # Extract info from filename
+        filename = selected.name
+        meeting_id = extract_meeting_id_from_filename(filename)
+        date = extract_date_from_filename(filename)
+
+        if not meeting_id or not date:
+            print(f"\n[ERROR] Filename doesn't match expected pattern: {filename}", file=sys.stderr)
+            sys.exit(1)
+
+        date_str = date.strftime("%Y-%m-%d")
+        print(f"  Detected: Meeting ID={meeting_id}, Date={date_str}")
+
+        # Look up course
+        mappings = zoom_cfg.get("meeting_id_mappings", {})
+        course = mappings.get(meeting_id)
+
+        if not course:
+            valid_courses = ["crash", "main", "g10", "g9"]
+            course = _ask(
+                f"\nMeeting ID not mapped. Which course is this for ({'/'.join(valid_courses)}): ",
+                choices=valid_courses,
+            )
+        else:
+            print(f"  Mapped to course: {course}")
+
+    # ── Step 3: Session number ────────────────────────────────────
+    while True:
+        try:
+            session = int(_ask("\nSession number (e.g. 5): "))
+            break
+        except ValueError:
+            print("  [!] Please enter a valid integer.")
+
+    # ── Step 4: Session type (if needed) ───────────────────────────
+    session_type: str | None = None
+    if course in ("g10", "g9"):
+        course_types_cfg = cfg["attendance"]["courses"][course].get("types", {})
+        all_types: list[str] = []
+        for bucket in course_types_cfg.values():
+            all_types.extend(bucket)
+
+        # Try auto-detection
+        if date_str:
+            from attendance.zoom_csv import determine_session_type
+            date = datetime.strptime(date_str, "%Y-%m-%d")
+            auto_type = determine_session_type(date, course, cfg)
+
+            if auto_type and auto_type != "ambiguous":
+                print(f"\n  Auto-detected session type: {auto_type}")
+                use_auto = _ask("Use this type? (y/n): ", choices=["y", "n"])
+                if use_auto.lower() == "y":
+                    session_type = auto_type
+
+        if not session_type:
+            print(f"\nAvailable session types for {course}:")
+            for i, t in enumerate(all_types, 1):
+                print(f"  {i}. {t}")
+            session_type = _ask("\nPaste or type the session type exactly as shown above: ")
+
+    # ── Step 5: Dry-run? ──────────────────────────────────────────
+    dr_answer = _ask(
+        "\nDry-run mode? (no data will be written)\n"
+        "  [y] Yes, just show me what would happen\n"
+        "  [n] No, write to Google Sheets for real\n"
+        "Choice (y/n): ",
+        choices=["y", "n"],
+    )
+    dry_run = dr_answer.lower() == "y"
+
+    print()
+    if dry_run:
+        print("[DRY-RUN MODE] No data will be written to Google Sheets.\n")
+
+    # ── Step 6: Process ────────────────────────────────────────────
+    try:
+        summary = run_zoom(
+            source=source,
+            course=course,
+            session_num=session,
+            session_type=session_type,
+            dry_run=dry_run,
+            config_path=args.config,
+            review_store_dir=review_dir,
+        )
+    except Exception as exc:
+        log.error("pipeline_error", extra={"error": str(exc)})
+        print(f"\n[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    send(summary, channel=notify_cfg.get("channel", "log"))
     print(summary.text())
 
     if summary.flagged > 0:
@@ -295,15 +556,122 @@ def _parse_marks_with_preview(lines: list[str], *, always_confirm: bool, assume_
 
 
 def cmd_process_text(args: argparse.Namespace) -> None:
-    from attendance.pipeline import run_text
-    
+    from attendance.pipeline import run_text, run_zoom
+    from attendance.zoom_csv import extract_date_from_filename, extract_meeting_id_from_filename
+
     cfg = _load_cfg(args.config)
-    
+
+    # Handle --from-archive flag for Zoom CSV reprocessing
+    if args.from_archive:
+        zoom_cfg = cfg.get("attendance", {}).get("zoom_csv", {})
+        if not zoom_cfg.get("enabled", False):
+            print("\n[ERROR] Zoom CSV integration is disabled in config.")
+            sys.exit(1)
+
+        archive_folder = zoom_cfg.get("archive_folder", "csv_archive")
+        archive_path = Path(archive_folder)
+
+        if not archive_path.exists():
+            print(f"\n[ERROR] Archive folder not found: {archive_folder}", file=sys.stderr)
+            sys.exit(1)
+
+        csv_files = list(archive_path.glob("*.csv"))
+        if not csv_files:
+            print(f"\n[ERROR] No CSV files found in archive folder: {archive_folder}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"\n  Found {len(csv_files)} archived CSV(s):")
+        for i, csv_file in enumerate(csv_files[:10], 1):
+            print(f"    {i}. {csv_file.name}")
+
+        if len(csv_files) > 10:
+            print(f"    ... and {len(csv_files) - 10} more")
+
+        while True:
+            try:
+                choice = int(input("\nSelect CSV number: "))
+                if 1 <= choice <= len(csv_files):
+                    selected = csv_files[choice - 1]
+                    break
+                print(f"  [!] Please enter a number between 1 and {len(csv_files)}")
+            except ValueError:
+                print("  [!] Please enter a valid number.")
+
+        source = str(selected)
+
+        # Extract info from filename
+        filename = selected.name
+        meeting_id = extract_meeting_id_from_filename(filename)
+        date = extract_date_from_filename(filename)
+
+        if not meeting_id or not date:
+            print(f"\n[ERROR] Filename doesn't match expected pattern: {filename}", file=sys.stderr)
+            sys.exit(1)
+
+        date_str = date.strftime("%Y-%m-%d")
+        print(f"  Detected: Meeting ID={meeting_id}, Date={date_str}")
+
+        # Look up course
+        mappings = zoom_cfg.get("meeting_id_mappings", {})
+        course = mappings.get(meeting_id)
+
+        if not course:
+            valid_courses = ["crash", "main", "g10", "g9"]
+            course = input(f"\nMeeting ID not mapped. Which course is this for ({'/'.join(valid_courses)}): ").strip()
+
+        # Get session number
+        session = args.session
+        if session is None:
+            while True:
+                try:
+                    session = int(input("Enter session number (e.g. 1): ").strip())
+                    break
+                except ValueError:
+                    print("Invalid number. Please try again.")
+
+        # Get session type if needed
+        session_type = args.type
+        if course in ("g10", "g9") and not session_type:
+            session_type = input("Enter session type (e.g. 'Saturday - Center'): ").strip()
+
+        dry_run = args.dry_run
+
+        if dry_run:
+            print("\n[DRY-RUN MODE] No data will be written to Google Sheets.\n")
+
+        try:
+            summary = run_zoom(
+                source=source,
+                course=course,
+                session_num=session,
+                session_type=session_type,
+                dry_run=dry_run,
+                force=args.force,
+                config_path=args.config,
+                review_store_dir=cfg["attendance"]["review"].get("local_dir", "review_queue"),
+            )
+        except Exception as exc:
+            log.error("pipeline_error", extra={"error": str(exc)})
+            print(f"\n[ERROR] {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        notify_cfg = cfg.get("core", {}).get("notify", {})
+        send(summary, channel=notify_cfg.get("channel", "log"))
+
+        print(summary.text())
+
+        if summary.flagged > 0:
+            print(f"\n{summary.flagged} item(s) need review. Run:")
+            print(f"  python -m attendance.cli review list\n")
+
+        return
+
+    # Original text processing logic
     # Interactive Prompts for Missing Args
     course = args.course
     if not course:
         course = input("Enter course (crash, main, g10, g9): ").strip()
-    
+
     session = args.session
     if session is None:
         while True:
@@ -312,22 +680,22 @@ def cmd_process_text(args: argparse.Namespace) -> None:
                 break
             except ValueError:
                 print("Invalid number. Please try again.")
-    
+
     session_type = args.type
     if course in ("g10", "g9") and not session_type:
         session_type = input("Enter session type (e.g. 'Saturday - Center'): ").strip()
-        
+
     dry_run = args.dry_run
-    
+
     if not args.text:
         text_file = input("Enter path to text file containing names: ").strip()
     else:
         text_file = args.text
-        
+
     if not os.path.exists(text_file):
         print(f"\n[ERROR] File not found: {text_file}", file=sys.stderr)
         sys.exit(1)
-        
+
     with open(text_file, "r", encoding="utf-8") as f:
         lines = [line.strip() for line in f if line.strip()]
 
@@ -858,6 +1226,17 @@ def main() -> None:
     )
     p_att.set_defaults(func=cmd_attend)
 
+    # zoom-attend (interactive wizard for Zoom attendance)
+    p_zoom = sub.add_parser(
+        "zoom-attend",
+        help="Interactive wizard for Zoom attendance: CSV upload or API fetch",
+        description=(
+            "Guided wizard for Zoom attendance processing.\n"
+            "Choose between CSV upload, Zoom API fetch, or reprocessing archived CSVs."
+        ),
+    )
+    p_zoom.set_defaults(func=cmd_zoom_attend)
+
     # process
     p_proc = sub.add_parser("process", help="Process a single attendance sheet photo")
     p_proc.add_argument("--image", required=True, help="Path to the photo")
@@ -883,6 +1262,8 @@ def main() -> None:
     p_proc_txt.add_argument("--force", action="store_true", default=False, help="Overwrite non-empty cells")
     p_proc_txt.add_argument("--yes", "-y", action="store_true", default=False,
                             help="Skip the confirmation prompt when a mark is not recognised")
+    p_proc_txt.add_argument("--from-archive", action="store_true", default=False,
+                            help="Reprocess an archived Zoom CSV instead of text input")
     p_proc_txt.set_defaults(func=cmd_process_text)
 
     # review

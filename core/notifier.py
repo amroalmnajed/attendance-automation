@@ -42,6 +42,9 @@ class RunSummary:
     prev_counts: Optional[dict] = None
     prev_session: str = ""
     drop_warning: str = ""
+    # Zoom-specific flags
+    teacher_not_found: bool = False
+    session_type_ambiguous: bool = False
 
     def text(self) -> str:
         # Polished Telegram-friendly card format
@@ -75,14 +78,18 @@ class RunSummary:
         if self.absent_offer and self.missing_count > 0:
             held = f" ({self.missing_held_back} held back — possible matches in review)" if self.missing_held_back else ""
             lines.append(f"🙈 *Not on sheet:* {self.missing_count}{held}")
-            
+        if self.teacher_not_found:
+            lines.append(f"⚠️ *Teacher not found in participant list*")
+        if self.session_type_ambiguous:
+            lines.append(f"⚠️ *Session type ambiguous - manual selection required*")
+
         if self.errors:
             lines.append(f"\n❌ *Errors:*")
             for e in self.errors[:3]:
                 # escape markdown reserved chars for the error string
                 e = e.replace("*", "").replace("_", "").replace("[", "").replace("]", "")
                 lines.append(f"• {e}")
-                
+
         return "\n".join(lines)
 
 

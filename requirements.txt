@@ -30,3 +30,6 @@ pytest-cov>=4.0.0
 # Ingest channel
 python-telegram-bot[job-queue]>=20.0
 
+# HTTP client for Zoom API
+httpx>=0.25.0
+

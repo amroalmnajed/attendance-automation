@@ -165,7 +165,7 @@ def _dispatch(text: str, ids: list[int]) -> None:
 
 
 def _admins(cfg: dict) -> list[int]:
-    return sorted(roles.admin_ids(cfg))
+    return sorted(roles.authorized_ids(cfg))
 
 
 def record(kind: str, now: Optional[float] = None) -> None:

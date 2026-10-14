@@ -64,6 +64,21 @@ NAMES_PASTE   = 6   # paste-names flow: waiting for the name list
 NAMES_CONFIRM = 7   # paste-names flow: waiting for "Process / Fix / Cancel" after the preview
 
 
+ZOOM_MEETING_ID = 8   # waiting for meeting ID input
+
+
+ZOOM_PICK_INSTANCE = 9  # waiting for user to pick from multiple instances
+
+
+ZOOM_PICK_TYPE = 10    # waiting for session type selection
+
+
+ZOOM_TEACHER_TIME = 11 # waiting for manual meeting start time
+
+
+ZOOM_CONFIRM = 12     # waiting for CONFIRM/CANCEL decision
+
+
 def _load_cfg(path: str = "config/attendance.yaml") -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)

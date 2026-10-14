@@ -47,6 +47,7 @@ class ReasonCode(str, Enum):
     INVALID_TYPE = "INVALID_TYPE"                          # session type not valid for parity
     API_ERROR = "API_ERROR"                                # Sheets or OCR API call failed
     PHOTO_MARK_CONFLICT = "PHOTO_MARK_CONFLICT"            # same name on 2+ photos with different marks
+    GUEST_UNMATCHED = "GUEST_UNMATCHED"                     # guest participant not matched to roster
 
 
 @dataclass

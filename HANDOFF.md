@@ -51,6 +51,68 @@ The previous chat had NO network: nothing below was test-run. Only py_compile wa
 ## Known open (not assigned)
 Markdown escaping of names elsewhere; raw `{e}` shown to users in /report, /streaks, /revert, search handler (use `_user_error_message`); resolution callback duplicates `cli review resolve` write logic (extract one `resolve_item()`); `handle_resolution_callback` is admin-only by design.
 
+## Zoom Attendance Automation Notes
+
+### Teacher Detection
+- Teacher name is configured as "Yaman" in `attendance.zoom_csv.teacher_name` (configurable)
+- Uses fuzzy matching with threshold (default 80) to detect teacher variations like "Yaman (iPad)", "Yaman (iPhone)"
+- Handles teacher rejoins by merging: earliest join time and latest leave time across all teacher sessions
+- If teacher is not found in participant list, the system prompts for manual meeting start time via Telegram or CLI
+- Teacher's presence affects the effective start time via `teacher_join_buffer_minutes` (default 5 minutes)
+
+### Session Type Auto-Detection
+- Only applies to Online sessions (ignores Center sessions)
+- For typed_pair courses (g9, g10), auto-detects session type from meeting date
+- Looks up day of week, filters allowed types for that day and course, keeps only Online variants
+- If exactly one Online variant matches → auto-select it
+- If multiple Online variants match (ambiguous) → prompt user to select via Telegram
+- If no Online variant matches → returns empty string (user must specify manually)
+
+### Meeting ID Auto-Learning
+- When processing a meeting ID not in `meeting_id_mappings`, offers to save the mapping
+- Uses `attendance._fslock.file_lock` for safe concurrent edits (same mechanism as review_queue.py and alias_admin.py)
+- Mapping is saved to `config/attendance.yaml` under `attendance.zoom_csv.meeting_id_mappings`
+- Lock is per-file, short-lived, and uses atomic write pattern to prevent corruption
+
+### CSV Validation Strategy
+- Expected filename format: `participants_<meeting_id>_<date>.csv` (e.g., `participants_81795786552_2026_09_13.csv`)
+- Required columns: "Name (original name)", "Join time", "Leave time", "Duration (minutes)", "Guest"
+- Optional columns: "Email", "Recording disclaimer response", "In waiting room" (ignored)
+- Flexible column detection by header name (case-insensitive)
+- Handles UTF-8 BOM if present
+- Handles duplicate entries (same student appears multiple times) by summing durations
+- Robust datetime parsing for format: "MM/DD/YYYY HH:MM:SS AM/PM"
+
+### Decision Logging
+- Decision logs are written to `logs/zoom_csv/` as JSON files
+- Filename format: `<meeting_id>_<date>_<timestamp>.log` to disambiguate multiple instances
+- Logs include: run_id, timestamp, and per-participant detail (name, mark, calculation detail)
+- Detail captures: total_duration, first_join, last_leave, effective_start, teacher_leave_time, rule_fired
+- Written for both dry-run and real runs
+
+### Zoom API Rate Limits and Readiness
+- Participant reports may not be immediately available after a meeting ends (typically a few minutes delay)
+- Bot handles "report not ready yet" gracefully with user-friendly message
+- OAuth tokens are cached with expiry handling (re-fetched before expiry)
+- Zoom API has rate limits; bot handles HTTP errors appropriately
+
+### Guest Participant Handling
+- All participants (including guests) are matched to roster using existing fuzzy matcher
+- Guests are NOT silently skipped - they go through the same matching process as regular students
+- If a guest name doesn't match anyone via fuzzy matcher, it's sent to review queue with `GUEST_UNMATCHED` reason code
+- This allows admins to either resolve the match or add it to the alias system for future auto-acceptance
+
+### CSV Archiving
+- After successful non-dry-run write, CSV files are moved to archive folder (default: `csv_archive`)
+- Archive path is configurable via `attendance.zoom_csv.archive_folder`
+- Archiving can be disabled via `attendance.zoom_csv.auto_archive_csv: false`
+- Archive failure warns but does not abort the write operation
+
+### Existing Type Values
+- For typed_pair courses (g9, g10), rows with existing type values are skipped and flagged in the Telegram summary
+- This prevents overwriting manually-entered session types
+- Only empty type cells are written during Zoom attendance processing
+
 ## Log
 - Baseline pytest: 352 passed. Env note: cloud session had no network, no pytest and no .venv, so tests ran on a scratch pytest-compatible runner + stand-ins for rapidfuzz/gspread/telegram/pytz (kept OUTSIDE the repo). Real PTB/gspread/Gemini behaviour is UNVERIFIED here: run `pip install -r requirements.txt && pytest -q` on a real venv first.
 - T1 done: ingest.py -> attendance/bot/{common,upload,names,review,admin,app}.py (all <400 lines); ingest.py is a 4-line shim; get_running_loop everywhere. Gotcha: handlers import helpers by name, so tests patch via `tests/botutil.py::patch_bot` (sets the attr on every bot module that has it) and find handlers via `botutil.handler(name)`. `_send_summary`/`_deliver_summary` live in review.py. 352 passed.

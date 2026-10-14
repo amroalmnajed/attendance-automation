@@ -3,6 +3,77 @@
 Newest first. Phases follow the feature plan (Phase 1 cleanup, 2 input, 3 accuracy, 4 operations).
 Test counts are `pytest -q` totals.
 
+## Zoom Attendance Automation (new feature)
+
+### Added
+- **Zoom API integration** (`attendance/zoom_api.py`): Server-to-Server OAuth token fetch with caching, participant report fetching, and instance listing for recurring meetings.
+- **Zoom CSV parsing** (`attendance/zoom_csv.py`): CSV file parsing with UTF-8 BOM support, teacher detection with fuzzy matching and rejoin merging, attendance calculation based on join time/duration/teacher presence, session type auto-detection, CSV archiving, meeting ID mapping with file locking, and decision logging.
+- **Zoom pipeline integration** (`attendance/pipeline.py`): `run_zoom()` function that processes Zoom data from either CSV files or Zoom API, integrates with existing matching and writing logic, and supports dry-run mode.
+- **Telegram bot Zoom commands** (`attendance/bot/zoom.py`): `/zoom_fetch` (API fetch), `/zoom_upload` (CSV upload), `/zoom_reprocess` (reprocess archived CSV) with shared wizard flow for meeting ID lookup, instance selection, session type detection, teacher time handling, and confirmation.
+- **CLI Zoom commands** (`attendance/cli.py`): `zoom-attend` interactive wizard for Zoom attendance, and `--from-archive` flag on `process-text` for reprocessing archived CSVs.
+- **Guest participant handling**: All participants (including guests) are matched to roster using existing fuzzy matcher. Unmatched guests are sent to review queue with `GUEST_UNMATCHED` reason code.
+
+### New config keys (`config/attendance.yaml`)
+| Key | Default |
+|---|---|
+| `attendance.zoom_csv.enabled` | `true` |
+| `attendance.zoom_csv.meeting_id_mappings` | `{}` (e.g., `81795786552: g10`) |
+| `attendance.zoom_csv.teacher_name` | `"Yaman"` |
+| `attendance.zoom_csv.teacher_fuzzy_match_threshold` | `80` |
+| `attendance.zoom_csv.teacher_join_buffer_minutes` | `5` |
+| `attendance.zoom_csv.late_threshold_minutes` | `15` |
+| `attendance.zoom_csv.min_duration_minutes` | `45` |
+| `attendance.zoom_csv.early_leave_threshold_minutes` | `20` |
+| `attendance.zoom_csv.duplicate_handling` | `"sum_duration"` |
+| `attendance.zoom_csv.auto_session_type` | `true` |
+| `attendance.zoom_csv.auto_archive_csv` | `true` |
+| `attendance.zoom_csv.archive_folder` | `"csv_archive"` |
+| `attendance.zoom_csv.auto_learn_meeting_ids` | `true` |
+| `attendance.zoom_csv.csv_strict_validation` | `true` |
+| `attendance.zoom_csv.log_folder` | `"logs/zoom_csv"` |
+| `attendance.zoom_csv.zoom_api.account_id_env` | `"ZOOM_ACCOUNT_ID"` |
+| `attendance.zoom_csv.zoom_api.client_id_env` | `"ZOOM_CLIENT_ID"` |
+| `attendance.zoom_csv.zoom_api.client_secret_env` | `"ZOOM_CLIENT_SECRET"` |
+| `attendance.zoom_csv.zoom_api.token_url` | `"https://zoom.us/oauth/token"` |
+| `attendance.zoom_csv.zoom_api.api_base_url` | `"https://api.zoom.us/v2"` |
+
+### Env vars
+- `ZOOM_ACCOUNT_ID` - Zoom account ID for Server-to-Server OAuth
+- `ZOOM_CLIENT_ID` - OAuth app client ID
+- `ZOOM_CLIENT_SECRET` - OAuth app client secret
+
+### Dependency
+- `requirements.txt`: `httpx>=0.25.0` - Modern HTTP client for Zoom API calls
+
+### New bot commands
+- `/zoom_fetch` - Fetch participant report from Zoom API by meeting ID
+- `/zoom_upload` - Upload a CSV file manually
+- `/zoom_reprocess` - Reprocess an archived CSV file
+
+### New CLI commands
+- `zoom-attend` - Interactive wizard for Zoom attendance (CSV upload / API fetch / reprocess archive)
+- `process-text --from-archive` - Reprocess an archived Zoom CSV
+
+### New files
+- `attendance/zoom_api.py` - Zoom API integration
+- `attendance/zoom_csv.py` - CSV parsing and attendance calculation
+- `attendance/bot/zoom.py` - Telegram handlers for Zoom flows
+- `tests/test_zoom_csv.py` - Tests for parsing/calculation
+- `tests/test_zoom_api.py` - Tests for Zoom API (mocked)
+
+### Modified files
+- `attendance/matcher.py` - Added `GUEST_UNMATCHED` reason code
+- `attendance/pipeline.py` - Added `run_zoom()` function
+- `attendance/cli.py` - Added `zoom-attend` subcommand and `--from-archive` flag
+- `attendance/bot/common.py` - Added Zoom conversation states
+- `attendance/bot/app.py` - Wired up Zoom commands and handlers
+- `attendance/bot/menu.py` - Added Zoom commands to menu
+- `core/notifier.py` - Added Zoom-specific flags to RunSummary
+
+### Tests
+- +24 tests for Zoom CSV parsing, attendance calculation, teacher detection, filename parsing, session type detection, archiving, meeting ID mapping, and decision logging
+- +9 tests for Zoom API OAuth token handling, participant fetching, and instance listing (all mocked)
+
 ## Phase 4 — Operations and security  (tests: 262 -> 352)
 
 ### Added

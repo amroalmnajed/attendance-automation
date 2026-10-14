@@ -54,6 +54,9 @@ def _make_fake_session() -> MagicMock:
     sess.type_col = None
     sess.roster = [("Test Student", 5)]
     sess.allowed_attendance = ["Present", "Late", "Not complete", "Absent"]
+    sess.course = "crash"
+    sess.sheet_id = "test_sheet"
+    sess.tab = "tab"
     return sess
 
 

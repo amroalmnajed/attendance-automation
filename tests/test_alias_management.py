@@ -97,21 +97,21 @@ def _call(monkeypatch, cfg, user_id, args, env=None):
 
 
 def test_command_is_admins_only_when_no_admin_is_configured(monkeypatch, cfg):
-    assert "admins only" in _call(monkeypatch, cfg, 1, [])
+    assert "not authorised" in _call(monkeypatch, cfg, 1, [])
 
 
 def test_command_refuses_non_admins_and_serves_admins(monkeypatch, cfg, tmp_path):
     cfg["attendance"]["match"]["aliases_file"] = str(tmp_path / "a.json")
     (tmp_path / "a.json").write_text(json.dumps({"g10": {"x y": {"X One": 1}}}), encoding="utf-8")
-    assert "admins only" in _call(monkeypatch, cfg, 2, ["list"], env={"ADMIN_TELEGRAM_IDS": "7"})
-    assert "x y" not in _call(monkeypatch, cfg, 2, ["list"], env={"ADMIN_TELEGRAM_IDS": "7"})
-    assert "x y → X One" in _call(monkeypatch, cfg, 7, ["list"], env={"ADMIN_TELEGRAM_IDS": "7"})
-    assert "Removed 1" in _call(monkeypatch, cfg, 7, ["remove", "g10", "x", "y"], env={"ADMIN_TELEGRAM_IDS": "7"})
+    assert "not authorised" in _call(monkeypatch, cfg, 2, ["list"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
+    assert "x y" not in _call(monkeypatch, cfg, 2, ["list"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
+    assert "x y → X One" in _call(monkeypatch, cfg, 7, ["list"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
+    assert "Removed 1" in _call(monkeypatch, cfg, 7, ["remove", "g10", "x", "y"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
 
 
 def test_admin_ids_from_config_and_env_ignore_junk():
-    c = {"attendance": {"admin": {"telegram_ids": [5, "6", "oops"]}}}
-    assert alias_admin.admin_ids(c, {"ADMIN_TELEGRAM_IDS": "7; 8,,x"}) == {5, 6, 7, 8}
+    c = {"attendance": {"authorized": {"telegram_ids": [5, "6", "oops"]}}}
+    assert alias_admin.admin_ids(c, {"AUTHORIZED_TELEGRAM_IDS": "7; 8,,x"}) == {5, 6, 7, 8}
     assert alias_admin.admin_ids({"attendance": {}}, {}) == set()          # fake/minimal config is fine
 
 

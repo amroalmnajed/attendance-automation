@@ -175,8 +175,10 @@ def mark_sent(review_dir: str, keys: Iterable[str]) -> None:
 
 def recipients(cfg: dict, env: Optional[dict] = None) -> list[int]:
     mode = settings(cfg)["recipients"]
-    admins, teachers = roles.admin_ids(cfg, env), roles.teacher_ids(cfg, env)
-    chosen = admins if mode == "admin" else teachers if mode == "teacher" else (admins | teachers)
+    admins = roles.authorized_ids(cfg, env)
+    # Note: teacher_ids no longer exists in the simplified roles module
+    # Use authorized IDs for all modes
+    chosen = admins
     return sorted(chosen)
 
 

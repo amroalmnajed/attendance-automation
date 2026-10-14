@@ -27,6 +27,11 @@ from attendance.bot.common import (
     NAMES_TYPE,
     PHOTO_FLOW,
     SEARCH_ROSTER,
+    ZOOM_CONFIRM,
+    ZOOM_MEETING_ID,
+    ZOOM_PICK_INSTANCE,
+    ZOOM_PICK_TYPE,
+    ZOOM_TEACHER_TIME,
     _guard,
     _load_cfg,
     _notify_failure,
@@ -61,6 +66,19 @@ from attendance.bot.admin import (
     cmd_streaks,
     handle_absent_callback,
     handle_revert_callback,
+)
+from attendance.bot.zoom import (
+    cmd_zoom_fetch,
+    cmd_zoom_reprocess,
+    cmd_zoom_upload,
+    handle_zoom_confirm_text,
+    handle_zoom_course_callback,
+    handle_zoom_csv_upload,
+    handle_zoom_instance_callback,
+    handle_zoom_meeting_id_text,
+    handle_zoom_reprocess_callback,
+    handle_zoom_teacher_time_text,
+    handle_zoom_type_callback,
 )
 
 
@@ -113,6 +131,9 @@ def main() -> None:
             MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo),
             CallbackQueryHandler(handle_mode_callback,   pattern=r"^mode\|"),
             CallbackQueryHandler(handle_search_callback, pattern=r"^srch\|"),
+            CommandHandler("zoom_fetch", cmd_zoom_fetch),
+            CommandHandler("zoom_upload", cmd_zoom_upload),
+            CommandHandler("zoom_reprocess", cmd_zoom_reprocess),
         ],
         states={
             PHOTO_FLOW: [
@@ -139,6 +160,24 @@ def main() -> None:
             SEARCH_ROSTER: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, search_input_handler),
                 MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo),
+            ],
+            ZOOM_MEETING_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_zoom_meeting_id_text),
+                MessageHandler(filters.Document.ALL, handle_zoom_csv_upload),
+                CallbackQueryHandler(handle_zoom_course_callback, pattern=r"^zoom\|course\|"),
+                CallbackQueryHandler(handle_zoom_reprocess_callback, pattern=r"^zoom\|reprocess\|"),
+            ],
+            ZOOM_PICK_INSTANCE: [
+                CallbackQueryHandler(handle_zoom_instance_callback, pattern=r"^zoom\|instance\|"),
+            ],
+            ZOOM_PICK_TYPE: [
+                CallbackQueryHandler(handle_zoom_type_callback, pattern=r"^zoom\|type\|"),
+            ],
+            ZOOM_TEACHER_TIME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_zoom_teacher_time_text),
+            ],
+            ZOOM_CONFIRM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_zoom_confirm_text),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_cmd)],

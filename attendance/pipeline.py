@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -25,6 +26,18 @@ from attendance.preprocess import prepare
 from attendance.review_queue import ReviewQueue
 from attendance.session_resolver import SheetSession, resolve
 from attendance.writer import WriteCell, batch_write
+from attendance.zoom_api import fetch_past_meeting_participants
+from attendance.zoom_csv import (
+    archive_csv,
+    calculate_attendance,
+    determine_session_type,
+    extract_date_from_filename,
+    extract_meeting_id_from_filename,
+    find_teacher,
+    parse_zoom_csv,
+    save_meeting_id_mapping,
+    write_decision_log,
+)
 from core.logger import get_logger
 from core.notifier import RunSummary
 
@@ -346,6 +359,155 @@ def run_text(
         review_store_dir=review_store_dir,
         summary=summary,
     )
+
+
+def run_zoom(
+    *,
+    source: str | dict[str, str],
+    course: str,
+    session_num: int,
+    session_type: Optional[str] = None,
+    dry_run: bool = True,
+    force: bool = False,
+    config_path: str = "config/attendance.yaml",
+    review_store_dir: str = "review_queue",
+) -> RunSummary:
+    """Execute the attendance pipeline for Zoom participant data.
+
+    Source can be:
+    - Local CSV file path (str)
+    - Dict with meeting_id, instance_uuid, date (from Zoom API)
+
+    Returns RunSummary with teacher_not_found flag if teacher detection fails.
+    """
+    cfg = load_config(config_path)
+    health_mod.configure(cfg)
+    att_cfg = cfg.get("attendance", {})
+    zoom_cfg = att_cfg.get("zoom_csv", {})
+
+    if not zoom_cfg.get("enabled", False):
+        summary = RunSummary(upload_id="zoom_disabled", course=course, session=str(session_num), dry_run=dry_run)
+        summary.errors.append("Zoom CSV integration is disabled in config")
+        return summary
+
+    upload_id = f"zoom_{course}_{session_num}"
+    log.info("pipeline_zoom_start", extra={"upload_id": upload_id, "source": source, "dry_run": dry_run})
+
+    summary = RunSummary(
+        upload_id=upload_id,
+        course=course,
+        session=str(session_num),
+        dry_run=dry_run,
+    )
+
+    # Parse participants from source
+    try:
+        if isinstance(source, str):
+            # CSV file path
+            participants = parse_zoom_csv(source)
+            meeting_id = extract_meeting_id_from_filename(Path(source).name)
+            date = extract_date_from_filename(Path(source).name)
+        else:
+            # Zoom API data
+            meeting_id = source.get("meeting_id")
+            instance_uuid = source.get("instance_uuid")
+            date_str = source.get("date")
+            participants = fetch_past_meeting_participants(
+                meeting_id=meeting_id,
+                instance_uuid=instance_uuid,
+                config=zoom_cfg.get("zoom_api", {}),
+            )
+            date = datetime.fromisoformat(date_str) if date_str else None
+    except Exception as e:
+        log.error("zoom_parse_error", extra={"error": str(e), "upload_id": upload_id})
+        summary.errors.append(f"Failed to parse Zoom data: {e}")
+        return summary
+
+    # Find teacher
+    teacher_name = zoom_cfg.get("teacher_name", "Yaman")
+    fuzzy_threshold = zoom_cfg.get("teacher_fuzzy_match_threshold", 80)
+    teacher = find_teacher(participants, teacher_name, fuzzy_threshold)
+
+    if teacher is None:
+        summary.teacher_not_found = True
+        log.warning("teacher_not_found_zoom", extra={"upload_id": upload_id})
+        return summary
+
+    meeting_start_time = teacher["join_time"]
+    meeting_end_time = teacher["leave_time"]
+
+    # Auto-determine session type if not provided
+    if not session_type and zoom_cfg.get("auto_session_type", True) and date:
+        session_type = determine_session_type(date, course, cfg)
+        if session_type == "ambiguous":
+            summary.session_type_ambiguous = True
+            log.warning("session_type_ambiguous", extra={"upload_id": upload_id})
+
+    # Calculate attendance
+    attendance_results = calculate_attendance(
+        participants=participants,
+        config=zoom_cfg,
+        meeting_start_time=meeting_start_time,
+        meeting_end_time=meeting_end_time,
+    )
+
+    if attendance_results is None:
+        summary.errors.append("Attendance calculation failed (teacher not found)")
+        return summary
+
+    # Convert to OcrRow format for existing pipeline
+    ocr_rows = []
+    for name, mark, detail in attendance_results:
+        ocr_rows.append(OcrRow(
+            raw_name=name,
+            status_mark=mark,
+            confidence=1.0,
+            row_index=len(ocr_rows) + 1,
+        ))
+
+    # Process through existing pipeline
+    result = _process_rows(
+        ocr_rows=ocr_rows,
+        course=course,
+        session_num=session_num,
+        session_type=session_type,
+        dry_run=dry_run,
+        force=force,
+        cfg=cfg,
+        min_conf=1.0,
+        upload_id=upload_id,
+        image_path="zoom_source",
+        review_store_dir=review_store_dir,
+        summary=summary,
+    )
+
+    # Post-processing for non-dry-run
+    if not dry_run:
+        # Archive CSV if it was a local file
+        if isinstance(source, str) and zoom_cfg.get("auto_archive_csv", True):
+            try:
+                archive_csv(source, zoom_cfg.get("archive_folder", "csv_archive"))
+            except Exception as e:
+                log.warning("csv_archive_failed", extra={"error": str(e), "upload_id": upload_id})
+
+        # Save meeting ID mapping if auto-learn enabled
+        if meeting_id and zoom_cfg.get("auto_learn_meeting_ids", True):
+            try:
+                save_meeting_id_mapping(meeting_id, course, config_path)
+            except Exception as e:
+                log.warning("meeting_id_save_failed", extra={"error": str(e), "upload_id": upload_id})
+
+        # Write decision log
+        try:
+            participants_detail = [
+                {"name": name, "mark": mark, "detail": detail}
+                for name, mark, detail in attendance_results
+            ]
+            write_decision_log(upload_id, participants_detail, zoom_cfg)
+        except Exception as e:
+            log.warning("decision_log_failed", extra={"error": str(e), "upload_id": upload_id})
+
+    return result
 
 
 def _process_rows(

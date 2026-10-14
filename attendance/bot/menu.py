@@ -25,6 +25,9 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("pending", "Items waiting for review", "authorized"),
     ("aliases", "Manage learned name aliases", "authorized"),
     ("health", "Bot health status", "authorized"),
+    ("zoom_fetch", "Fetch Zoom attendance via API", "authorized"),
+    ("zoom_upload", "Upload Zoom CSV file", "authorized"),
+    ("zoom_reprocess", "Reprocess archived Zoom CSV", "authorized"),
 ]
 
 
@@ -44,6 +47,7 @@ def help_text(uid, cfg) -> str:
         return "You don't have access to this bot."
     lines = ["Here's what you can do:", ""] + [f"/{c} — {d}" for c, d in cmds]
     lines += ["", "Tip: send a photo of the sheet, or type /start and pick a course."]
+    lines += ["", "Zoom commands: /zoom_fetch, /zoom_upload, /zoom_reprocess"]
     return "\n".join(lines)
 
 

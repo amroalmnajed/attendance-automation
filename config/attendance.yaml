@@ -175,6 +175,31 @@ attendance:
     mirror_sheet_id_env: OPS_SHEET_ID
     tab: Review
 
+  # Zoom CSV and API integration for automated attendance
+  zoom_csv:
+    enabled: true
+    meeting_id_mappings:
+      # Example: 81795786552: g10
+    teacher_name: "Yaman"
+    teacher_fuzzy_match_threshold: 80
+    teacher_join_buffer_minutes: 5
+    late_threshold_minutes: 15
+    min_duration_minutes: 45
+    early_leave_threshold_minutes: 20
+    duplicate_handling: "sum_duration"
+    auto_session_type: true
+    auto_archive_csv: true
+    archive_folder: "csv_archive"
+    auto_learn_meeting_ids: true
+    csv_strict_validation: true
+    log_folder: "logs/zoom_csv"
+    zoom_api:
+      account_id_env: ZOOM_ACCOUNT_ID
+      client_id_env: ZOOM_CLIENT_ID
+      client_secret_env: ZOOM_CLIENT_SECRET
+      token_url: "https://zoom.us/oauth/token"
+      api_base_url: "https://api.zoom.us/v2"
+
   # Canonical attendance values — these are compared (case-insensitively) against live dropdowns.
   attendance_values:
     Present: Present

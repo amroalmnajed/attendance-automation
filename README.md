@@ -34,3 +34,44 @@ matcher thresholds from resolved review items.
 ## Deploy
 
 See `DEPLOYMENT.md` (Railway and Windows service instructions).
+
+## Zoom Attendance Automation
+
+The bot supports automated attendance processing for Zoom meetings via two methods:
+
+### 1. Zoom API Fetch
+Fetch participant reports directly from Zoom using the Server-to-Server OAuth app.
+
+**Zoom App Setup:**
+1. Go to [Zoom Marketplace](https://marketplace.zoom.us/) and create a Server-to-Server OAuth app
+2. Required scope: `report:read:admin` (for accessing participant reports)
+3. Copy the Account ID, Client ID, and Client Secret from the app credentials
+4. Store these as Railway environment variables:
+   - `ZOOM_ACCOUNT_ID` - Your Zoom account ID
+   - `ZOOM_CLIENT_ID` - OAuth app client ID
+   - `ZOOM_CLIENT_SECRET` - OAuth app client secret
+
+**Important Notes:**
+- Participant reports may not be immediately available after a meeting ends (typically a few minutes delay)
+- Zoom API has rate limits; the bot handles "report not ready yet" gracefully
+- Credentials are stored as environment variables, never committed to the repository
+
+### 2. Manual CSV Upload
+Upload Zoom participant CSV files manually via Telegram.
+
+**CSV Format:**
+- Filename: `participants_<meeting_id>_<date>.csv` (e.g., `participants_81795786552_2026_09_13.csv`)
+- Required columns: "Name (original name)", "Join time", "Leave time", "Duration (minutes)", "Guest"
+- Optional columns: "Email", "Recording disclaimer response", "In waiting room" (ignored)
+- The system calculates attendance based on join time, duration, and teacher presence
+
+**Telegram Commands:**
+- `/zoom_fetch` - Fetch participant report from Zoom API by meeting ID
+- `/zoom_upload` - Upload a CSV file manually
+- `/zoom_reprocess` - Reprocess an archived CSV file
+
+**Teacher Detection:**
+- Teacher name is configured as "Yaman" (configurable in `attendance.yaml`)
+- Uses fuzzy matching to detect teacher variations (e.g., "Yaman (iPad)", "Yaman (iPhone)")
+- If teacher is not found, the system prompts for manual meeting start time
+- Teacher's presence affects the effective start time (configured buffer of 5 minutes)
