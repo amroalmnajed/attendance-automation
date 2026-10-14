@@ -189,13 +189,14 @@ async def _handle_instances_or_date(
                 lambda: list_recent_meeting_instances(meeting_id, _load_cfg().get("attendance", {}).get("zoom_csv", {}).get("zoom_api", {}))
             )
             if len(instances) == 0:
+                # No instances found — ask the user for the date so we can still proceed
                 await update.message.reply_text(
-                    f"⚠️ No meeting instances found for ID `{meeting_id}`.\n\n"
-                    f"The meeting may not have happened yet, or you don't have access.\n\n"
-                    f"Please use `/zoom_upload` to upload the CSV file manually instead.",
+                    f"⚠️ No recent meeting instances found for `{meeting_id}`.\n\n"
+                    f"Enter the meeting date manually (format: `YYYY-MM-DD`, e.g., `{datetime.now().strftime('%Y-%m-%d')}`):",
                     parse_mode=ParseMode.MARKDOWN,
                 )
-                return ConversationHandler.END
+                context.user_data["zoom_source_type"] = "api"
+                return ZOOM_TEACHER_TIME
             elif len(instances) >= 1:
                 # Sort instances by start_time (most recent first) and use the most recent
                 instances_sorted = sorted(instances, key=lambda x: x.get("start_time", ""), reverse=True)
@@ -217,12 +218,14 @@ async def _handle_instances_or_date(
         except Exception as e:
             log.warning("zoom_instances_failed", extra={"error": str(e), "meeting_id": meeting_id})
             error_msg = str(e)
+            # Don't end — fall back to asking for date
             await update.message.reply_text(
                 f"⚠️ Could not fetch meeting instances: {error_msg}\n\n"
-                f"💡 You can use `/zoom_upload` to upload the CSV file manually from Zoom instead.",
+                f"Enter the meeting date manually (format: `YYYY-MM-DD`, e.g., `{datetime.now().strftime('%Y-%m-%d')}`):",
                 parse_mode=ParseMode.MARKDOWN,
             )
-            return ConversationHandler.END
+            context.user_data["zoom_source_type"] = "api"
+            return ZOOM_TEACHER_TIME
 
 
 # ─── Callback handlers ───────────────────────────────────────────────────────

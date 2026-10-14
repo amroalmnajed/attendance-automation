@@ -448,6 +448,7 @@ def run_zoom(
         config=zoom_cfg,
         meeting_start_time=meeting_start_time,
         meeting_end_time=meeting_end_time,
+        teacher_name=teacher_name,
     )
 
     if attendance_results is None:

@@ -241,6 +241,7 @@ def calculate_attendance(
     config: dict,
     meeting_start_time: Optional[datetime],
     meeting_end_time: Optional[datetime],
+    teacher_name: Optional[str] = None,
 ) -> Optional[list[tuple[str, str, dict[str, Any]]]]:
     """Calculate attendance marks for all participants.
 
@@ -249,6 +250,8 @@ def calculate_attendance(
         config: Zoom CSV configuration dict
         meeting_start_time: Teacher's join time (or None if teacher not found)
         meeting_end_time: Teacher's leave time (or None)
+        teacher_name: Teacher's name to exclude from student attendance results.
+            Uses the same fuzzy threshold as find_teacher.
 
     Returns:
         List of (name, attendance_mark, detail) tuples, or None if teacher not found.
@@ -263,13 +266,22 @@ def calculate_attendance(
     min_duration = config.get("min_duration_minutes", 45)
     early_leave_threshold = timedelta(minutes=config.get("early_leave_threshold_minutes", 20))
     duplicate_handling = config.get("duplicate_handling", "sum_duration")
+    fuzzy_threshold = config.get("teacher_fuzzy_match_threshold", 80)
 
     effective_start = meeting_start_time + teacher_join_buffer
 
-    # Group by name (handle duplicates)
+    # Exclude teacher from student attendance (they were already used to establish meeting times)
+    def _is_teacher(name: str) -> bool:
+        if not teacher_name:
+            return False
+        return fuzz.token_sort_ratio(name.lower(), teacher_name.lower()) >= fuzzy_threshold
+
+    # Group by name (handle duplicates), skipping the teacher
     by_name: dict[str, list[dict[str, Any]]] = {}
     for p in participants:
         name = p["name"].strip()
+        if _is_teacher(name):
+            continue
         if name not in by_name:
             by_name[name] = []
         by_name[name].append(p)

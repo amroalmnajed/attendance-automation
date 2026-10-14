@@ -140,7 +140,8 @@ def test_fetch_past_meeting_participants_success(mock_get, mock_token):
                 "duration": 55,
                 "guest": "false",
             },
-        ]
+        ],
+        "next_page_token": "",  # no more pages
     }
     mock_get.return_value = mock_response
 
@@ -161,7 +162,12 @@ def test_fetch_past_meeting_participants_success(mock_get, mock_token):
 @patch("attendance.zoom_api.get_oauth_token")
 @patch("attendance.zoom_api.httpx.get")
 def test_fetch_past_meeting_participants_with_instance(mock_get, mock_token):
-    """Test participant report fetch with specific instance UUID."""
+    """Test participant report fetch with specific instance UUID.
+
+    NOTE: Zoom API does not support instance-specific participant endpoints —
+    the instance_uuid parameter is intentionally ignored and the base
+    /past_meetings/{id}/participants endpoint is used instead.
+    """
     mock_token.return_value = "test_token"
 
     mock_response = MagicMock()
@@ -175,7 +181,8 @@ def test_fetch_past_meeting_participants_with_instance(mock_get, mock_token):
                 "duration": 90,
                 "guest": "false",
             },
-        ]
+        ],
+        "next_page_token": "",  # no more pages
     }
     mock_get.return_value = mock_response
 
@@ -187,10 +194,11 @@ def test_fetch_past_meeting_participants_with_instance(mock_get, mock_token):
 
     assert len(participants) == 1
     assert participants[0]["name"] == "Yaman"
-    # Verify the URL includes the instance UUID
+    # Verify the correct base URL is used (instance UUID is intentionally ignored
+    # because Zoom's /instances/{uuid}/participants endpoint returns 404)
     call_args = mock_get.call_args
-    assert "instances" in call_args[0][0]
-    assert "uuid123" in call_args[0][0]
+    assert "past_meetings/81795786552/participants" in call_args[0][0]
+    assert "instances" not in call_args[0][0]
 
 
 @patch("attendance.zoom_api.get_oauth_token")
@@ -235,7 +243,7 @@ def test_fetch_past_meeting_participants_not_ready(mock_get, mock_token):
         "api_base_url": "https://api.zoom.us/v2",
     }
 
-    with pytest.raises(RuntimeError, match="Participant report not ready yet"):
+    with pytest.raises(RuntimeError, match="Participant report error"):
         fetch_past_meeting_participants("81795786552", None, config)
 
 

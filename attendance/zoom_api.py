@@ -146,22 +146,44 @@ def fetch_past_meeting_participants(
 
     # Use the simple endpoint without instance UUID
     # Zoom's /instances/{uuid}/participants endpoint returns 404, but /participants works
-    url = f"{api_base}/past_meetings/{meeting_id}/participants"
-    log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "url": url})
+    base_url = f"{api_base}/past_meetings/{meeting_id}/participants"
+    log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "url": base_url})
 
     try:
-        response = httpx.get(url, headers=headers, timeout=30)
-        log.info("zoom_participants_response", extra={"status": response.status_code, "url": url})
+        all_participants: list[dict[str, Any]] = []
+        next_page_token: Optional[str] = None
+        page = 0
 
-        response.raise_for_status()
-        data = response.json()
+        while True:
+            page += 1
+            params: dict[str, Any] = {"page_size": 300}
+            if next_page_token:
+                params["next_page_token"] = next_page_token
 
-        participants = data.get("participants", [])
-        log.info("zoom_participants_fetched", extra={"meeting_id": meeting_id, "count": len(participants)})
+            url = base_url
+            response = httpx.get(url, headers=headers, params=params, timeout=30)
+            if page == 1:
+                log.info("zoom_participants_response", extra={"status": response.status_code, "url": url})
+
+            response.raise_for_status()
+            data = response.json()
+
+            page_participants = data.get("participants", [])
+            all_participants.extend(page_participants)
+
+            next_page_token = data.get("next_page_token", "")
+            if not next_page_token:
+                break
+
+        log.info("zoom_participants_fetched", extra={
+            "meeting_id": meeting_id,
+            "count": len(all_participants),
+            "pages": page,
+        })
 
         # Normalize participant data
         normalized = []
-        for p in participants:
+        for p in all_participants:
             normalized.append({
                 "name": p.get("name", ""),
                 "email": p.get("email"),
