@@ -219,7 +219,7 @@ async def _handle_instances_or_date(
             error_msg = str(e)
             await update.message.reply_text(
                 f"⚠️ Could not fetch meeting instances: {error_msg}\n\n"
-                f"Please use `/zoom_upload` to upload the CSV file manually instead.",
+                f"💡 You can use `/zoom_upload` to upload the CSV file manually from Zoom instead.",
                 parse_mode=ParseMode.MARKDOWN,
             )
             return ConversationHandler.END
@@ -545,10 +545,18 @@ async def _process_zoom_attendance(update: Update, context: ContextTypes.DEFAULT
 
         if summary.errors:
             error_text = "\n".join(summary.errors[:3])
-            await status_msg.edit_text(
-                f"❌ Errors occurred:\n\n{error_text}",
-                parse_mode=ParseMode.MARKDOWN,
-            )
+            # Check if it's a "report not ready" error and suggest CSV upload
+            if "not ready" in error_text.lower():
+                await status_msg.edit_text(
+                    f"❌ Errors occurred:\n\n{error_text}\n\n"
+                    f"💡 *Tip:* If the report isn't ready yet, you can use `/zoom_upload` to upload the CSV file manually from Zoom instead.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            else:
+                await status_msg.edit_text(
+                    f"❌ Errors occurred:\n\n{error_text}",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
             return ConversationHandler.END
 
         # Show dry-run preview

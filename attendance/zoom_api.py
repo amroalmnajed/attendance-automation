@@ -157,7 +157,7 @@ def fetch_past_meeting_participants(
             raise RuntimeError(f"Meeting not found: {meeting_id}") from e
         elif e.response.status_code == 400:
             # Report not ready yet
-            raise RuntimeError("Participant report not ready yet. Try again in a few minutes.") from e
+            raise RuntimeError("Participant report not ready yet. Zoom can take 5-15 minutes to generate reports after a meeting ends. Try again later or use CSV upload instead.") from e
         else:
             log.error("zoom_participants_http_error", extra={"status": e.response.status_code, "text": e.response.text})
             raise RuntimeError(f"Zoom API failed: {e.response.status_code}") from e

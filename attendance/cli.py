@@ -213,6 +213,7 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
                 date_str = None
         except Exception as e:
             print(f"\n[WARNING] Could not list instances: {e}")
+            print("  Tip: You can use CSV upload mode instead by choosing [c] at the source prompt.")
             print("  Continuing with manual date entry...")
             instance_uuid = None
             date_str = None
