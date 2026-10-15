@@ -19,7 +19,13 @@ EXPECTED_LEVEL = {
                    "handle_names_paste", "handle_names_done", "handle_names_confirm", "cancel_cmd",
                    "cmd_revert", "handle_revert_callback", "handle_absent_callback", "cmd_help",
                    "handle_search_callback", "search_input_handler", "handle_resolution_callback",
-                   "cmd_report", "cmd_streaks", "cmd_pending", "cmd_aliases", "cmd_health"],
+                   "cmd_report", "cmd_streaks", "cmd_pending", "cmd_aliases", "cmd_health",
+                   "cmd_zoom_fetch", "cmd_zoom_upload", "cmd_zoom_reprocess",
+                   "handle_zoom_meeting_id_text", "handle_zoom_course_callback",
+                   "handle_zoom_instance_callback", "handle_zoom_reprocess_callback",
+                   "handle_zoom_teacher_time_text", "handle_zoom_type_callback",
+                   "handle_zoom_csv_upload", "handle_zoom_session_num_text",
+                   "handle_zoom_confirm_text"],
 }
 ALL = [(lvl, n) for lvl, names in EXPECTED_LEVEL.items() for n in names]
 

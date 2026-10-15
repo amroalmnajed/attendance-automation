@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -362,6 +362,26 @@ def run_text(
     )
 
 
+def _parse_manual_time(time_str: str, base_date: Optional[date] = None) -> Optional[datetime]:
+    time_str = time_str.strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d %I:%M %p", "%Y-%m-%d %I:%M%p"):
+        try:
+            return datetime.strptime(time_str, fmt)
+        except ValueError:
+            pass
+    parsed_time = None
+    for fmt in ("%I:%M %p", "%I:%M%p", "%I:%M:%S %p", "%I:%M:%S%p", "%H:%M", "%H:%M:%S"):
+        try:
+            parsed_time = datetime.strptime(time_str, fmt).time()
+            break
+        except ValueError:
+            pass
+    if parsed_time is not None:
+        d = base_date or datetime.now().date()
+        return datetime.combine(d, parsed_time)
+    return None
+
+
 def run_zoom(
     *,
     source: str | dict[str, str],
@@ -372,14 +392,15 @@ def run_zoom(
     force: bool = False,
     config_path: str = "config/attendance.yaml",
     review_store_dir: str = "review_queue",
+    manual_start_time: Optional[str | datetime] = None,
 ) -> RunSummary:
     """Execute the attendance pipeline for Zoom participant data.
 
     Source can be:
     - Local CSV file path (str)
-    - Dict with meeting_id, date (from Zoom API) - instance_uuid is not used
+    - Dict with meeting_id, instance_uuid (optional), date (from Zoom API)
 
-    Returns RunSummary with teacher_not_found flag if teacher detection fails.
+    Returns RunSummary with teacher_not_found flag if teacher detection fails and no manual_start_time provided.
     """
     cfg = load_config(config_path)
     health_mod.configure(cfg)
@@ -411,10 +432,11 @@ def run_zoom(
         else:
             # Zoom API data
             meeting_id = source.get("meeting_id")
+            instance_uuid = source.get("instance_uuid")
             date_str = source.get("date")
             participants = fetch_past_meeting_participants(
                 meeting_id=meeting_id,
-                instance_uuid=None,  # Not used - Zoom API doesn't support instance-specific endpoint
+                instance_uuid=instance_uuid,
                 config=zoom_cfg.get("zoom_api", {}),
             )
             date = datetime.fromisoformat(date_str) if date_str else None
@@ -428,13 +450,30 @@ def run_zoom(
     fuzzy_threshold = zoom_cfg.get("teacher_fuzzy_match_threshold", 80)
     teacher = find_teacher(participants, teacher_name, fuzzy_threshold)
 
-    if teacher is None:
+    meeting_start_time = None
+    meeting_end_time = None
+
+    if teacher is not None:
+        meeting_start_time = teacher["join_time"]
+        meeting_end_time = teacher["leave_time"]
+    elif manual_start_time is not None:
+        if isinstance(manual_start_time, datetime):
+            meeting_start_time = manual_start_time
+        elif isinstance(manual_start_time, str):
+            base_d = date.date() if isinstance(date, datetime) else None
+            if base_d is None and participants:
+                for p in participants:
+                    if p.get("join_time"):
+                        base_d = p["join_time"].date()
+                        break
+            meeting_start_time = _parse_manual_time(manual_start_time, base_d)
+            if meeting_start_time is None:
+                summary.errors.append(f"Invalid manual start time format: {manual_start_time}")
+                return summary
+    else:
         summary.teacher_not_found = True
         log.warning("teacher_not_found_zoom", extra={"upload_id": upload_id})
         return summary
-
-    meeting_start_time = teacher["join_time"]
-    meeting_end_time = teacher["leave_time"]
 
     # Auto-determine session type if not provided
     if not session_type and zoom_cfg.get("auto_session_type", True) and date:

@@ -237,7 +237,7 @@ def _input_settings() -> dict:
 
 def _get_sheet_url(course: str, cfg: dict) -> str:
     """Get the Google Sheet URL for a course."""
-    course_cfg = cfg["attendance"]["courses"].get(course, {})
+    course_cfg = (cfg.get("attendance") or {}).get("courses", {}).get(course, {})
     sheet_id_env = course_cfg.get("sheet_id_env")
     if not sheet_id_env:
         return ""

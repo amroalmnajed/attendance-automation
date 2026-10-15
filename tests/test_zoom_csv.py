@@ -12,6 +12,7 @@ import yaml
 from attendance.zoom_csv import (
     archive_csv,
     calculate_attendance,
+    clean_zoom_name,
     determine_session_type,
     extract_date_from_filename,
     extract_meeting_id_from_filename,
@@ -366,6 +367,25 @@ def test_determine_session_type_unambiguous():
     assert session_type == "Saturday - Online"
 
 
+def test_determine_session_type_hyphen_attached_day():
+    """Test session type auto-detection with hyphen-attached strings like 'Sunday- Online'."""
+    cfg = {
+        "attendance": {
+            "courses": {
+                "g10": {
+                    "layout": "typed_pair",
+                    "types": {
+                        "odd": ["Sunday- Center", "Sunday- Online"],
+                    },
+                }
+            }
+        }
+    }
+    date = datetime(2026, 9, 13)  # Sunday
+    session_type = determine_session_type(date, "g10", cfg)
+    assert session_type == "Sunday- Online"
+
+
 def test_determine_session_type_ambiguous():
     """Test session type ambiguity when multiple Online variants match."""
     cfg = {
@@ -458,3 +478,97 @@ def test_write_decision_log():
             log_data = json.load(f)
         assert log_data["run_id"] == "test_run"
         assert len(log_data["participants"]) == 2
+
+
+# ─── clean_zoom_name tests ───────────────────────────────────────────────────
+
+def test_clean_zoom_name():
+    """Test cleaning Zoom display names."""
+    # Bilingual: English first
+    assert clean_zoom_name("Ahmed Idris -- أحمد إدريس") == "Ahmed Idris"
+    assert clean_zoom_name("Ahmed Idris - أحمد إدريس") == "Ahmed Idris"
+
+    # Bilingual: Arabic first
+    assert clean_zoom_name("أحمد إدريس -- Ahmed Idris") == "Ahmed Idris"
+    assert clean_zoom_name("أحمد إدريس - Ahmed Idris") == "Ahmed Idris"
+
+    # Parenthetical alias
+    assert clean_zoom_name("Omar Morad (Omar Morad e116)") == "Omar Morad"
+    assert clean_zoom_name("Yaman (Teacher)") == "Yaman"
+
+    # Bracket alias
+    assert clean_zoom_name("Ahmed [iPad]") == "Ahmed"
+    assert clean_zoom_name("Yaman [Host]") == "Yaman"
+
+    # Whole name inside parentheses or brackets
+    assert clean_zoom_name("(Omar Morad)") == "Omar Morad"
+    assert clean_zoom_name("[Omar Morad]") == "Omar Morad"
+
+    # Device suffixes after hyphen / slash
+    assert clean_zoom_name("Omar - iPad") == "Omar"
+    assert clean_zoom_name("Sarah / iPhone") == "Sarah"
+
+    # Pure Arabic name preserved
+    assert clean_zoom_name("أحمد إدريس") == "أحمد إدريس"
+
+    # Already clean name
+    assert clean_zoom_name("Omar Morad") == "Omar Morad"
+
+    # Blank / empty
+    assert clean_zoom_name("") == ""
+    assert clean_zoom_name("   ") == ""
+
+
+# ─── run_zoom pipeline tests ─────────────────────────────────────────────────
+
+def test_run_zoom_teacher_not_found(tmp_path):
+    """When teacher is not in CSV and no manual start time provided, sets teacher_not_found=True."""
+    from attendance.pipeline import run_zoom
+
+    csv_file = tmp_path / "participants_81795786552_2026_09_13.csv"
+    csv_file.write_text(
+        "Name (Original Name),User Email,Join Time,Leave Time,Duration (Minutes),Guest\n"
+        "Ahmed Ali,ahmed@example.com,09/13/2026 10:35:00 AM,09/13/2026 11:35:00 AM,60,Yes\n",
+        encoding="utf-8"
+    )
+
+    summary = run_zoom(
+        source=str(csv_file),
+        course="g10",
+        session_num=1,
+        dry_run=True,
+    )
+    assert summary.teacher_not_found is True
+
+
+def test_run_zoom_with_manual_start_time(tmp_path, monkeypatch):
+    """When teacher is missing but manual_start_time is given, proceeds with attendance calculation."""
+    from attendance.pipeline import run_zoom
+
+    csv_file = tmp_path / "participants_81795786552_2026_09_13.csv"
+    csv_file.write_text(
+        "Name (Original Name),User Email,Join Time,Leave Time,Duration (Minutes),Guest\n"
+        "Ahmed Ali,ahmed@example.com,09/13/2026 10:35:00 AM,09/13/2026 11:35:00 AM,60,Yes\n",
+        encoding="utf-8"
+    )
+
+    captured_ocr_rows = []
+
+    def mock_process_rows(**kw):
+        captured_ocr_rows.extend(kw.get("ocr_rows", []))
+        return kw["summary"]
+
+    monkeypatch.setattr("attendance.pipeline._process_rows", mock_process_rows)
+
+    summary = run_zoom(
+        source=str(csv_file),
+        course="g10",
+        session_num=1,
+        dry_run=True,
+        manual_start_time="10:30 AM",
+    )
+    assert summary.teacher_not_found is False
+    assert len(captured_ocr_rows) == 1
+    assert captured_ocr_rows[0].raw_name == "Ahmed Ali"
+    assert captured_ocr_rows[0].status_mark == "Present"
+

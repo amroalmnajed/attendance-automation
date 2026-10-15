@@ -40,7 +40,7 @@ def _protect_real_alias_store():
 @pytest.fixture(autouse=True)
 def _clean_role_env():
     """Role allow-lists come from env; a developer's real .env must not change test outcomes."""
-    names = ("ADMIN_TELEGRAM_IDS", "TEACHER_TELEGRAM_IDS")
+    names = ("ADMIN_TELEGRAM_IDS", "TEACHER_TELEGRAM_IDS", "AUTHORIZED_TELEGRAM_IDS")
     saved = {n: os.environ.pop(n, None) for n in names}
     try:
         yield

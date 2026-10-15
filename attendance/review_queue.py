@@ -17,6 +17,7 @@ from typing import Optional
 import pytz
 import yaml
 
+from attendance import aliases, writer
 from attendance.aliases import AliasStore
 from attendance.matcher import MatchResult, ReasonCode
 from attendance.ocr import OcrRow
@@ -109,7 +110,7 @@ def resolve_item(
                 new_value=session_type,
             ))
 
-    batch_write(
+    writer.batch_write(
         session_info,
         cells,
         upload_id=upload_id,
@@ -120,7 +121,7 @@ def resolve_item(
     # Learn alias if not dry-run
     match_cfg = cfg["attendance"].get("match", {})
     if not dry_run and roster_row > 0 and match_cfg.get("learn_aliases", True):
-        AliasStore(
+        aliases.AliasStore(
             path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
             min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
         ).learn(item["course"], item["raw_name"], roster_name)

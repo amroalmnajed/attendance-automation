@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import shutil
 from datetime import datetime, timedelta
@@ -24,31 +25,68 @@ log = get_logger("zoom_csv")
 
 # ─── Zoom display-name cleaner ────────────────────────────────────────────────
 
-# Matches bilingual "English Name -- Arabic Name" or "English Name - Arabic Name" where the
-# second part contains Arabic script.  We keep only the English half.
-_BILINGUAL_SEP = re.compile(r'\s*[-–—]{1,3}\s*[؀-ۿ]')
-
-# Matches anything inside parentheses or brackets — Zoom users append room codes,
-# device aliases, e.g. "Omar Morad (Omar Morad e116)" or "Ahmed [iPad]".
-_PAREN_OR_BRACKET = re.compile(r'\s*[\(\[][^\)\]]*[\)\]]')
+_ARABIC_CHAR = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
+_LATIN_CHAR = re.compile(r'[a-zA-Z]')
+_PAREN_OR_BRACKET = re.compile(r'[\(\[][^\)\]]*[\)\]]')
+_DEVICE_SUFFIX = re.compile(r'[-–—/]\s*(?:i?pad|i?phone|tablet|pc|laptop|android|ios|mac|windows|host|co-host|teacher|e\d+)\b', re.IGNORECASE)
+_TRAILING_DASH = re.compile(r'[\s\-–—/:]+$')
+_LEADING_DASH = re.compile(r'^[\s\-–—/:]+')
 
 
 def clean_zoom_name(name: str) -> str:
     """Strip Zoom display-name artefacts that hurt fuzzy matching.
 
-    Handles three common patterns seen in practice:
-    1. Bilingual suffix:  "Ahmed Idris -- أحمد إدريس"  →  "Ahmed Idris"
-    2. Parenthetical:     "Omar Morad (Omar Morad e116)"  →  "Omar Morad"
-    3. Bracket alias:     "Ahmed [iPad]"  →  "Ahmed"
-
-    The original name is returned unchanged if none of these patterns are present,
-    so calling this on a clean name is always safe.
+    Handles:
+    1. Bilingual names (English first or Arabic first):
+       "Ahmed Idris -- أحمد إدريس"  →  "Ahmed Idris"
+       "أحمد إدريس -- Ahmed Idris"  →  "Ahmed Idris"
+    2. Parenthetical suffixes & aliases:
+       "Omar Morad (Omar Morad e116)"  →  "Omar Morad"
+       "(Omar Morad)"  →  "Omar Morad" (preserves content if wrapped entirely)
+    3. Bracket tags:
+       "Ahmed [iPad]"  →  "Ahmed"
+    4. Device suffixes after hyphens/slashes:
+       "Omar - iPad"  →  "Omar"
+    5. Pure Arabic or already clean names are preserved safely.
     """
-    # Strip Arabic / bilingual suffix first (may itself contain brackets)
-    cleaned = _BILINGUAL_SEP.split(name, maxsplit=1)[0]
-    # Strip parenthetical / bracket groups
-    cleaned = _PAREN_OR_BRACKET.sub('', cleaned)
-    return cleaned.strip()
+    if not name or not name.strip():
+        return ""
+
+    raw = name.strip()
+
+    # Step 1: Strip known device / role suffixes after hyphens or slashes
+    cleaned = _DEVICE_SUFFIX.sub('', raw)
+
+    # Step 2: Strip parenthetical or bracket groups
+    without_parens = _PAREN_OR_BRACKET.sub('', cleaned).strip()
+    if without_parens:
+        cleaned = without_parens
+    else:
+        # If the entire string was inside parens/brackets, strip only outer delimiters
+        cleaned = re.sub(r'^[\(\[]+|[\)\]]+$', '', cleaned).strip()
+
+    # Step 3: Handle bilingual names (keep the Latin/English half matching our rosters)
+    has_arabic = bool(_ARABIC_CHAR.search(cleaned))
+    has_latin = bool(_LATIN_CHAR.search(cleaned))
+
+    if has_arabic and has_latin:
+        # Split on common bilingual delimiters: --, -, —, /, |, :
+        parts = re.split(r'\s*[-–—/|:]+\s*', cleaned)
+        latin_parts = [p.strip() for p in parts if _LATIN_CHAR.search(p) and not _ARABIC_CHAR.search(p)]
+        if latin_parts:
+            cleaned = " ".join(latin_parts)
+        else:
+            # If no clear delimiter separator, remove Arabic script characters
+            cleaned = _ARABIC_CHAR.sub('', cleaned).strip()
+
+    # Step 4: Clean leading / trailing delimiters
+    cleaned = _LEADING_DASH.sub('', cleaned)
+    cleaned = _TRAILING_DASH.sub('', cleaned)
+
+    # Collapse multiple whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    return cleaned if cleaned else raw
 
 
 # ─── CSV parsing ───────────────────────────────────────────────────────────────
@@ -139,7 +177,7 @@ def parse_zoom_csv(file_path: str) -> list[dict[str, Any]]:
                 email = row.get(email_col, "").strip() if email_col else None
 
                 participants.append({
-                    "name": name,
+                    "name": clean_zoom_name(name) or name,
                     "email": email,
                     "join_time": join_time,
                     "leave_time": leave_time,
@@ -231,9 +269,15 @@ def find_teacher(
         return None
 
     # Find all fuzzy matches (exact matches will score 100)
+    teacher_clean = clean_zoom_name(teacher_name).lower()
     teacher_entries = []
     for p in participants:
-        score = fuzz.token_sort_ratio(p["name"].lower(), teacher_name.lower())
+        p_name = p.get("name", "")
+        p_clean = clean_zoom_name(p_name).lower()
+        score = max(
+            fuzz.token_sort_ratio(p_name.lower(), teacher_name.lower()),
+            fuzz.token_sort_ratio(p_clean, teacher_clean),
+        )
         if score >= fuzzy_threshold:
             teacher_entries.append(p)
 
@@ -241,9 +285,14 @@ def find_teacher(
         log.warning("teacher_not_found", extra={"teacher_name": teacher_name})
         return None
 
+    def _to_naive(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is not None and getattr(dt, "tzinfo", None) is not None:
+            return dt.replace(tzinfo=None)
+        return dt
+
     # Merge rejoins: take earliest join and latest leave
-    earliest_join = min(p["join_time"] for p in teacher_entries if p["join_time"])
-    latest_leave = max(p["leave_time"] for p in teacher_entries if p["leave_time"])
+    earliest_join = _to_naive(min(p["join_time"] for p in teacher_entries if p["join_time"]))
+    latest_leave = _to_naive(max(p["leave_time"] for p in teacher_entries if p["leave_time"]))
     total_duration = sum(p["duration_minutes"] for p in teacher_entries)
 
     merged = {
@@ -290,6 +339,14 @@ def calculate_attendance(
     if meeting_start_time is None:
         return None
 
+    def _to_naive(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is not None and getattr(dt, "tzinfo", None) is not None:
+            return dt.replace(tzinfo=None)
+        return dt
+
+    meeting_start_time = _to_naive(meeting_start_time)
+    meeting_end_time = _to_naive(meeting_end_time)
+
     teacher_join_buffer = timedelta(minutes=config.get("teacher_join_buffer_minutes", 5))
     late_threshold = timedelta(minutes=config.get("late_threshold_minutes", 15))
     min_duration = config.get("min_duration_minutes", 45)
@@ -299,17 +356,24 @@ def calculate_attendance(
 
     effective_start = meeting_start_time + teacher_join_buffer
 
+    teacher_clean = clean_zoom_name(teacher_name).lower() if teacher_name else ""
+
     # Exclude teacher from student attendance (they were already used to establish meeting times)
     def _is_teacher(name: str) -> bool:
         if not teacher_name:
             return False
-        return fuzz.token_sort_ratio(name.lower(), teacher_name.lower()) >= fuzzy_threshold
+        clean = clean_zoom_name(name).lower()
+        score = max(
+            fuzz.token_sort_ratio(name.lower(), teacher_name.lower()),
+            fuzz.token_sort_ratio(clean, teacher_clean),
+        )
+        return score >= fuzzy_threshold
 
-    # Group by name (handle duplicates), skipping the teacher
+    # Group by cleaned name (handle duplicates), skipping the teacher
     by_name: dict[str, list[dict[str, Any]]] = {}
     for p in participants:
-        name = p["name"].strip()
-        if _is_teacher(name):
+        name = clean_zoom_name(p["name"]) or p["name"].strip()
+        if not name or _is_teacher(name):
             continue
         if name not in by_name:
             by_name[name] = []
@@ -319,8 +383,8 @@ def calculate_attendance(
     for name, entries in by_name.items():
         # Sum durations across duplicate sessions
         total_duration = sum(p["duration_minutes"] for p in entries)
-        first_join = min(p["join_time"] for p in entries if p["join_time"])
-        last_leave = max(p["leave_time"] for p in entries if p["leave_time"])
+        first_join = _to_naive(min(p["join_time"] for p in entries if p["join_time"]))
+        last_leave = _to_naive(max(p["leave_time"] for p in entries if p["leave_time"]))
 
         # Compute duration from timestamps for comparison
         if first_join and last_leave:
@@ -445,11 +509,16 @@ def determine_session_type(
     # Collect all Online types for this day
     online_types = []
     for parity, type_list in types_cfg.items():
+        if not isinstance(type_list, (list, tuple)):
+            continue
         for t in type_list:
+            if not isinstance(t, str):
+                continue
             if "online" in t.lower():
-                # Check if this type matches the day
-                type_day = t.split()[0].lower()  # e.g., "saturday" from "Saturday - Online"
-                if type_day == day_of_week:
+                # Check if this type matches the day (e.g. "Saturday - Online" or "Sunday- Online")
+                parts = re.split(r"[\s\-]+", t.strip())
+                type_day = parts[0].lower() if parts else ""
+                if type_day == day_of_week and t not in online_types:
                     online_types.append(t)
 
     if len(online_types) == 1:
@@ -511,7 +580,10 @@ def save_meeting_id_mapping(meeting_id: str, course: str, config_path: str) -> N
 
         if meeting_id not in mappings:
             mappings[meeting_id] = course
-            atomic_write_json(config_file, cfg)
+            tmp = config_file.with_name(config_file.name + f".{os.getpid()}.tmp")
+            with open(tmp, "w", encoding="utf-8") as f_out:
+                yaml.safe_dump(cfg, f_out, allow_unicode=True, sort_keys=False)
+            os.replace(tmp, config_file)
             log.info("meeting_id_mapped", extra={"meeting_id": meeting_id, "course": course})
         else:
             log.info("meeting_id_already_mapped", extra={"meeting_id": meeting_id, "existing": mappings[meeting_id]})

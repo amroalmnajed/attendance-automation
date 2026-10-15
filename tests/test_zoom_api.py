@@ -72,7 +72,7 @@ def test_get_oauth_token_cache(mock_post):
     assert mock_post.call_count == 1  # No additional call
 
 
-@patch.dict("os.environ", {})
+@patch.dict("os.environ", {}, clear=True)
 def test_get_oauth_token_missing_credentials():
     """Test OAuth token fetch with missing credentials."""
     config = {
@@ -164,9 +164,8 @@ def test_fetch_past_meeting_participants_success(mock_get, mock_token):
 def test_fetch_past_meeting_participants_with_instance(mock_get, mock_token):
     """Test participant report fetch with specific instance UUID.
 
-    NOTE: Zoom API does not support instance-specific participant endpoints —
-    the instance_uuid parameter is intentionally ignored and the base
-    /past_meetings/{id}/participants endpoint is used instead.
+    When instance_uuid is provided, Zoom API uses the double-encoded UUID
+    as the {meetingId} parameter: /past_meetings/{uuid}/participants.
     """
     mock_token.return_value = "test_token"
 
@@ -194,10 +193,8 @@ def test_fetch_past_meeting_participants_with_instance(mock_get, mock_token):
 
     assert len(participants) == 1
     assert participants[0]["name"] == "Yaman"
-    # Verify the correct base URL is used (instance UUID is intentionally ignored
-    # because Zoom's /instances/{uuid}/participants endpoint returns 404)
     call_args = mock_get.call_args
-    assert "past_meetings/81795786552/participants" in call_args[0][0]
+    assert "past_meetings/uuid123/participants" in call_args[0][0]
     assert "instances" not in call_args[0][0]
 
 

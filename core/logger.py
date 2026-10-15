@@ -44,7 +44,7 @@ class _JsonFormatter(logging.Formatter):
 
 # ─── Module-level setup ───────────────────────────────────────────────────────
 
-_LOG_DIR = Path(os.getenv("LOG_DIR", "logs"))
+_LOG_DIR = Path(os.getenv("LOG_DIR", "logs")).resolve()
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _AUDIT_PATH = _LOG_DIR / "audit.jsonl"
@@ -62,6 +62,7 @@ def _build_logger(name: str, level_str: str = "INFO") -> logging.Logger:
     logger.addHandler(ch)
 
     # File handler — JSON lines in logs/app.jsonl
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(_LOG_DIR / "app.jsonl", encoding="utf-8")
     fh.setFormatter(_JsonFormatter())
     logger.addHandler(fh)

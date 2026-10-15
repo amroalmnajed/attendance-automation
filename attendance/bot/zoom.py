@@ -45,6 +45,7 @@ from attendance.bot.common import (
 @_guard("authorized", conv=True)
 async def cmd_zoom_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start Zoom API fetch flow - ask for meeting ID or course nickname."""
+    context.user_data.clear()
     await update.message.reply_text(
         "📹 *Zoom Attendance — API Fetch*\n\n"
         "Enter the Zoom meeting ID (e.g., `81795786552`) or course nickname (e.g., `g10`):",
@@ -56,6 +57,7 @@ async def cmd_zoom_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 @_guard("authorized", conv=True)
 async def cmd_zoom_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start CSV upload flow - prompt user to upload CSV file."""
+    context.user_data.clear()
     await update.message.reply_text(
         "📹 *Zoom Attendance — CSV Upload*\n\n"
         "Please upload the Zoom participant CSV file.\n\n"
@@ -69,6 +71,7 @@ async def cmd_zoom_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 @_guard("authorized", conv=True)
 async def cmd_zoom_reprocess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """List archived CSVs and let user pick one to reprocess."""
+    context.user_data.clear()
     cfg = _load_cfg()
     zoom_cfg = cfg.get("attendance", {}).get("zoom_csv", {})
     archive_folder = zoom_cfg.get("archive_folder", "csv_archive")
@@ -329,9 +332,8 @@ async def handle_zoom_teacher_time_text(update: Update, context: ContextTypes.DE
     """User entered meeting date (or teacher start time if teacher not found)."""
     text = update.message.text.strip()
 
-    # Check if this is a date or a time
-    if ":" in text:
-        # This is a time (manual teacher start time fallback)
+    # Check if this is a time (manual teacher start time fallback)
+    if ":" in text or text.upper().endswith(("AM", "PM")):
         context.user_data["zoom_manual_start_time"] = text
         return await _process_zoom_attendance(update, context)
 
@@ -340,7 +342,8 @@ async def handle_zoom_teacher_time_text(update: Update, context: ContextTypes.DE
         date = datetime.strptime(text, "%Y-%m-%d")
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid date format. Please use `YYYY-MM-DD` (e.g., `2026-09-13`).",
+            "❌ Invalid format. Please enter a date (`YYYY-MM-DD`, e.g., `2026-09-13`) "
+            "or a start time (`HH:MM AM/PM`, e.g., `10:30 AM`).",
             parse_mode=ParseMode.MARKDOWN,
         )
         return ZOOM_TEACHER_TIME
@@ -352,8 +355,14 @@ async def handle_zoom_teacher_time_text(update: Update, context: ContextTypes.DE
 async def _handle_session_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Auto-detect session type or prompt user if ambiguous."""
     course = context.user_data["zoom_course"]
-    date_str = context.user_data["zoom_date"]
-    date = datetime.fromisoformat(date_str)
+    date_str = context.user_data.get("zoom_date")
+    if date_str:
+        try:
+            date = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+        except Exception:
+            date = datetime.now()
+    else:
+        date = datetime.now()
     cfg = _load_cfg()
 
     session_type = determine_session_type(date, course, cfg)
@@ -517,6 +526,8 @@ async def _process_zoom_attendance(update: Update, context: ContextTypes.DEFAULT
         # Run dry-run
         status_msg = await update.effective_message.reply_text("🔍 Processing attendance (dry-run)...")
 
+        manual_start = context.user_data.get("zoom_manual_start_time")
+
         def run_dry():
             return run_zoom(
                 source=source,
@@ -526,6 +537,7 @@ async def _process_zoom_attendance(update: Update, context: ContextTypes.DEFAULT
                 dry_run=True,
                 config_path="config/attendance.yaml",
                 review_store_dir="review_queue",
+                manual_start_time=manual_start,
             )
 
         summary = await _run_blocking(run_dry)
@@ -628,6 +640,8 @@ async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT
 
         status_msg = await update.effective_message.reply_text("✍️ Writing to sheet...")
 
+        manual_start = context.user_data.get("zoom_manual_start_time")
+
         def run_write():
             return run_zoom(
                 source=source,
@@ -637,6 +651,7 @@ async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT
                 dry_run=False,
                 config_path="config/attendance.yaml",
                 review_store_dir="review_queue",
+                manual_start_time=manual_start,
             )
 
         final_summary = await _run_blocking(run_write)
@@ -650,7 +665,10 @@ async def handle_zoom_confirm_text(update: Update, context: ContextTypes.DEFAULT
             except Exception as e:
                 log.warning("csv_archive_failed", extra={"error": str(e)})
 
-        await status_msg.edit_text(final_summary.text(), parse_mode=ParseMode.MARKDOWN)
+        if status_msg is not None and hasattr(status_msg, "edit_text"):
+            await status_msg.edit_text(final_summary.text(), parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.effective_message.reply_text(final_summary.text(), parse_mode=ParseMode.MARKDOWN)
         context.user_data.clear()
         return ConversationHandler.END
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import os
 import time
+import urllib.parse
 from datetime import datetime
 from typing import Any, Optional
 
@@ -18,7 +19,7 @@ log = get_logger("zoom_api")
 
 
 def _parse_zoom_datetime(dt_str: Optional[str]) -> Optional[datetime]:
-    """Parse Zoom API datetime string to datetime object.
+    """Parse Zoom API datetime string to naive UTC datetime object.
 
     Zoom API returns ISO 8601 format like: "2026-10-13T17:07:42Z"
     """
@@ -28,7 +29,10 @@ def _parse_zoom_datetime(dt_str: Optional[str]) -> Optional[datetime]:
         # Handle ISO 8601 format with or without timezone
         if dt_str.endswith('Z'):
             dt_str = dt_str[:-1] + '+00:00'
-        return datetime.fromisoformat(dt_str)
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
     except (ValueError, TypeError):
         log.warning("zoom_datetime_parse_failed", extra={"dt_str": dt_str})
         return None
@@ -144,10 +148,15 @@ def fetch_past_meeting_participants(
         "Content-Type": "application/json",
     }
 
-    # Use the simple endpoint without instance UUID
-    # Zoom's /instances/{uuid}/participants endpoint returns 404, but /participants works
-    base_url = f"{api_base}/past_meetings/{meeting_id}/participants"
-    log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "url": base_url})
+    # Per Zoom API documentation, if instance_uuid is provided, it serves as the past meeting identifier.
+    # If the UUID begins with '/' or contains '//', it must be double URL-encoded.
+    if instance_uuid:
+        target_id = urllib.parse.quote(urllib.parse.quote(instance_uuid, safe=""), safe="")
+    else:
+        target_id = meeting_id
+
+    base_url = f"{api_base}/past_meetings/{target_id}/participants"
+    log.info("zoom_participants_fetching", extra={"meeting_id": meeting_id, "instance_uuid": instance_uuid, "url": base_url})
 
     try:
         all_participants: list[dict[str, Any]] = []
@@ -181,15 +190,33 @@ def fetch_past_meeting_participants(
             "pages": page,
         })
 
+        from attendance.zoom_csv import clean_zoom_name
+
         # Normalize participant data
         normalized = []
         for p in all_participants:
+            join_dt = _parse_zoom_datetime(p.get("join_time"))
+            leave_dt = _parse_zoom_datetime(p.get("leave_time"))
+
+            raw_duration = float(p.get("duration", 0))
+            if join_dt and leave_dt:
+                computed_mins = max(0.0, (leave_dt - join_dt).total_seconds() / 60.0)
+                if abs(raw_duration - computed_mins) < 1.0:
+                    duration_minutes = raw_duration
+                else:
+                    duration_minutes = round(raw_duration / 60.0, 2)
+            else:
+                duration_minutes = round(raw_duration / 60.0, 2) if raw_duration > 300 else raw_duration
+
+            raw_name = p.get("name", "")
+            clean_name = clean_zoom_name(raw_name)
+
             normalized.append({
-                "name": p.get("name", ""),
+                "name": clean_name or raw_name,
                 "email": p.get("email"),
-                "join_time": _parse_zoom_datetime(p.get("join_time")),
-                "leave_time": _parse_zoom_datetime(p.get("leave_time")),
-                "duration_minutes": p.get("duration", 0),
+                "join_time": join_dt,
+                "leave_time": leave_dt,
+                "duration_minutes": duration_minutes,
                 "guest": p.get("guest", "") == "true",
             })
 
