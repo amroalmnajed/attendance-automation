@@ -31,6 +31,13 @@ def get_credentials() -> service_account.Credentials:
         )
         return creds
 
+    local_sa = Path("service_account.json")
+    if local_sa.exists():
+        creds = service_account.Credentials.from_service_account_file(
+            str(local_sa), scopes=SCOPES
+        )
+        return creds
+
     # Fallback: ADC (works on Cloud Run without a key file)
     creds, _ = google.auth.default(scopes=SCOPES)
     return creds  # type: ignore[return-value]

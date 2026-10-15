@@ -17,6 +17,7 @@ from attendance.zoom_csv import (
     extract_date_from_filename,
     extract_meeting_id_from_filename,
     find_teacher,
+    get_course_for_meeting_id,
     parse_zoom_csv,
     save_meeting_id_mapping,
     validate_csv_structure,
@@ -324,6 +325,9 @@ def test_extract_meeting_id_from_filename():
     """Test meeting ID extraction from filename."""
     assert extract_meeting_id_from_filename("participants_81795786552_2026_09_13.csv") == "81795786552"
     assert extract_meeting_id_from_filename("participants_123456789_2026_10_14.csv") == "123456789"
+    assert extract_meeting_id_from_filename("participants_83570905451_2026_10_12 (1).csv") == "83570905451"
+    assert extract_meeting_id_from_filename("participants_83570905451_2026_10_12 (2).CSV") == "83570905451"
+    assert extract_meeting_id_from_filename(r"C:\Users\foo\participants_83570905451_2026_10_12 (1).csv") == "83570905451"
     assert extract_meeting_id_from_filename("invalid_filename.csv") is None
     assert extract_meeting_id_from_filename("participants_abc_2026_09_13.csv") is None
 
@@ -340,6 +344,12 @@ def test_extract_date_from_filename():
     assert date is not None
     assert date.month == 10
     assert date.day == 14
+
+    date = extract_date_from_filename("participants_83570905451_2026_10_12 (1).csv")
+    assert date is not None
+    assert date.year == 2026
+    assert date.month == 10
+    assert date.day == 12
 
     assert extract_date_from_filename("invalid_filename.csv") is None
 
@@ -443,17 +453,44 @@ def test_archive_csv():
 
 # ─── Meeting ID mapping tests ─────────────────────────────────────────────────
 
+def test_get_course_for_meeting_id():
+    """Test get_course_for_meeting_id handles both str and int keys transparently."""
+    mappings = {
+        81795786552: "main",      # int key (typical YAML parsing)
+        "83570905451": "g10",     # str key
+    }
+    # Look up int key with str and int
+    assert get_course_for_meeting_id(mappings, "81795786552") == "main"
+    assert get_course_for_meeting_id(mappings, 81795786552) == "main"
+
+    # Look up str key with str and int
+    assert get_course_for_meeting_id(mappings, "83570905451") == "g10"
+    assert get_course_for_meeting_id(mappings, 83570905451) == "g10"
+
+    # Missing keys or empty mappings
+    assert get_course_for_meeting_id(mappings, "999999999") is None
+    assert get_course_for_meeting_id(mappings, None) is None
+    assert get_course_for_meeting_id({}, "81795786552") is None
+
+
 def test_save_meeting_id_mapping():
     """Test saving meeting ID mapping to config."""
     with tempfile.TemporaryDirectory() as tmpdir:
         config_path = Path(tmpdir) / "config.yaml"
-        config_path.write_text("attendance:\n  zoom_csv:\n    meeting_id_mappings: {}")
+        # Seed with an existing int key (as YAML safe_load would produce)
+        config_path.write_text("attendance:\n  zoom_csv:\n    meeting_id_mappings:\n      81795786552: main\n")
 
+        # Saving an already existing meeting_id (even as string) shouldn't duplicate it
+        save_meeting_id_mapping("81795786552", "main", str(config_path))
+
+        # Saving a new meeting_id
         save_meeting_id_mapping("123456789", "g10", str(config_path))
 
         with open(config_path, "r") as f:
             cfg = yaml.safe_load(f)
-        assert cfg["attendance"]["zoom_csv"]["meeting_id_mappings"]["123456789"] == "g10"
+        mappings = cfg["attendance"]["zoom_csv"]["meeting_id_mappings"]
+        assert mappings["123456789"] == "g10"
+        assert get_course_for_meeting_id(mappings, "81795786552") == "main"
 
 
 # ─── Decision log tests ─────────────────────────────────────────────────────

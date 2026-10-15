@@ -220,3 +220,33 @@ def test_review_resolve_learns_alias_after_successful_write():
         assert store.lookup("crash", raw_name) == "Mohamed Ali Salem"
     finally:
         _cleanup_temp_dir(tmpdir)
+
+
+def test_review_enqueue_logs_and_stores_explicit_reason(caplog):
+    """Ensure explicit reason (e.g. CELL_NONEMPTY) is logged and stored, not match_result.reason."""
+    import logging
+    from attendance.matcher import ReasonCode
+    tmpdir = _make_temp_dir()
+    try:
+        rq = ReviewQueue(store_dir=tmpdir)
+        mr = _make_match_result()
+        mr.reason.value = "OK"
+        ocr_row = _make_ocr_row("Test Student")
+        with caplog.at_level(logging.INFO):
+            item_id = rq.enqueue(
+                upload_id="test_explicit_reason",
+                course="crash",
+                session=1,
+                image_ref="img.jpg",
+                ocr_row=ocr_row,
+                match_result=mr,
+                raw_mark="P",
+                reason=ReasonCode.CELL_NONEMPTY,
+            )
+        item = rq.get("test_explicit_reason", item_id)
+        assert item["reason_code"] == "CELL_NONEMPTY"
+        log_records = [r for r in caplog.records if r.message == "review_enqueued"]
+        assert len(log_records) == 1
+        assert getattr(log_records[0], "reason", None) == "CELL_NONEMPTY"
+    finally:
+        _cleanup_temp_dir(tmpdir)

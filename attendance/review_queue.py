@@ -18,11 +18,10 @@ import pytz
 import yaml
 
 from attendance import aliases, writer
-from attendance.aliases import AliasStore
 from attendance.matcher import MatchResult, ReasonCode
 from attendance.ocr import OcrRow
 from attendance.session_resolver import SheetSession
-from attendance.writer import WriteCell, batch_write
+from attendance.writer import WriteCell
 from core.logger import get_logger
 
 log = get_logger("review_queue")
@@ -297,7 +296,7 @@ class ReviewQueue:
             extra={
                 "upload_id": upload_id,
                 "item_id": item_id,
-                "reason": match_result.reason.value,
+                "reason": reason_val,
             },
         )
         return item_id

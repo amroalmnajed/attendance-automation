@@ -13,6 +13,7 @@ from attendance.bot.zoom import (
     cmd_zoom_upload,
     handle_zoom_confirm_text,
     handle_zoom_course_callback,
+    handle_zoom_reprocess_callback,
     handle_zoom_session_num_text,
     handle_zoom_teacher_time_text,
 )
@@ -227,3 +228,24 @@ def test_handle_zoom_teacher_time_text_invalid_format():
     assert "Invalid format" in update.replies[0][0]
     assert "zoom_manual_start_time" not in context.user_data
     assert "zoom_date" not in context.user_data
+
+
+# ─── handle_zoom_reprocess_callback tests ───────────────────────────────────
+
+def test_handle_zoom_reprocess_callback_ignore():
+    """Clicking '... and N more' (zoom|ignore) must answer query and stay in ZOOM_MEETING_ID."""
+    update = _make_callback_update("zoom|ignore")
+    context = _make_context()
+
+    res = asyncio.run(handle_zoom_reprocess_callback(update, context))
+    assert res == ZOOM_MEETING_ID
+    update.callback_query.answer.assert_awaited_once()
+
+
+def test_handle_zoom_reprocess_callback_short_data():
+    """Invalid/short callback data without 3 parts stays in ZOOM_MEETING_ID without raising IndexError."""
+    update = _make_callback_update("zoom|reprocess")
+    context = _make_context()
+
+    res = asyncio.run(handle_zoom_reprocess_callback(update, context))
+    assert res == ZOOM_MEETING_ID

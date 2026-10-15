@@ -3,8 +3,13 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 
 from telegram import ReplyKeyboardRemove, Update
+from telegram.warnings import PTBUserWarning
+
+# Mute noisy PTBUserWarning about per_message=False with CallbackQueryHandler
+warnings.filterwarnings("ignore", category=PTBUserWarning, message=r".*per_message=False.*")
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -167,7 +172,7 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_zoom_meeting_id_text),
                 MessageHandler(filters.Document.ALL, handle_zoom_csv_upload),
                 CallbackQueryHandler(handle_zoom_course_callback, pattern=r"^zoom\|course\|"),
-                CallbackQueryHandler(handle_zoom_reprocess_callback, pattern=r"^zoom\|reprocess\|"),
+                CallbackQueryHandler(handle_zoom_reprocess_callback, pattern=r"^zoom\|(?:reprocess\||ignore$)"),
             ],
             ZOOM_PICK_INSTANCE: [
                 CallbackQueryHandler(handle_zoom_instance_callback, pattern=r"^zoom\|instance\|"),

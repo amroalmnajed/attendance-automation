@@ -61,6 +61,11 @@ if not exist ".env" (
     exit /b 1
 )
 
+:: --- Auto-set GOOGLE_APPLICATION_CREDENTIALS if service_account.json exists locally ---
+if not defined GOOGLE_APPLICATION_CREDENTIALS (
+    if exist "service_account.json" set "GOOGLE_APPLICATION_CREDENTIALS=service_account.json"
+)
+
 :: --- Start the bot ---
 echo  [INFO] Bot is running. Open Telegram and send /start
 echo.

@@ -17,7 +17,7 @@ from typing import Any, Optional
 import yaml
 from rapidfuzz import fuzz
 
-from attendance._fslock import atomic_write_json, file_lock
+from attendance._fslock import file_lock
 from core.logger import get_logger
 
 log = get_logger("zoom_csv")
@@ -439,13 +439,14 @@ def extract_meeting_id_from_filename(filename: str) -> Optional[str]:
     """Extract meeting ID from filename pattern: participants_<meeting_id>_<date>.csv
 
     Args:
-        filename: CSV filename
+        filename: CSV filename or path
 
     Returns:
         Meeting ID string or None if pattern doesn't match
     """
-    pattern = r"participants_(\d+)_\d{4}_\d{2}_\d{2}\.csv"
-    match = re.match(pattern, filename)
+    base_name = Path(filename).name
+    pattern = r"^participants_(\d+)_\d{4}_\d{2}_\d{2}(?:\s*\(\d+\))?\.csv$"
+    match = re.match(pattern, base_name, re.IGNORECASE)
     if match:
         return match.group(1)
     return None
@@ -453,17 +454,19 @@ def extract_meeting_id_from_filename(filename: str) -> Optional[str]:
 
 def extract_date_from_filename(filename: str) -> Optional[datetime]:
     """Extract date from filename pattern: participants_<meeting_id>_<date>.csv
+    Supports duplicate copy suffixes like (1).csv.
 
-    Date format: MM_DD_YYYY
+    Date format: YYYY_MM_DD
 
     Args:
-        filename: CSV filename
+        filename: CSV filename or path
 
     Returns:
         datetime object or None if pattern doesn't match
     """
-    pattern = r"participants_\d+_(\d{4}_\d{2}_\d{2})\.csv"
-    match = re.match(pattern, filename)
+    base_name = Path(filename).name
+    pattern = r"^participants_\d+_(\d{4}_\d{2}_\d{2})(?:\s*\(\d+\))?\.csv$"
+    match = re.match(pattern, base_name, re.IGNORECASE)
     if match:
         date_str = match.group(1)
         try:
@@ -559,6 +562,30 @@ def archive_csv(file_path: str, archive_folder: str) -> None:
 
 # ─── Meeting ID mapping ─────────────────────────────────────────────────────────
 
+def get_course_for_meeting_id(mappings: dict, meeting_id: str | int | None) -> Optional[str]:
+    """Look up course for a meeting ID, supporting both str and int keys.
+
+    Args:
+        mappings: meeting_id_mappings dict from config
+        meeting_id: Zoom meeting ID (str or int)
+
+    Returns:
+        Course string or None if not found
+    """
+    if not mappings or meeting_id is None:
+        return None
+    mid_str = str(meeting_id).strip()
+    if mid_str in mappings:
+        return mappings[mid_str]
+    try:
+        mid_int = int(mid_str)
+        if mid_int in mappings:
+            return mappings[mid_int]
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
 def save_meeting_id_mapping(meeting_id: str, course: str, config_path: str) -> None:
     """Add new meeting ID to course mapping in config file.
 
@@ -578,15 +605,17 @@ def save_meeting_id_mapping(meeting_id: str, course: str, config_path: str) -> N
         zoom_cfg = cfg.setdefault("attendance", {}).setdefault("zoom_csv", {})
         mappings = zoom_cfg.setdefault("meeting_id_mappings", {})
 
-        if meeting_id not in mappings:
-            mappings[meeting_id] = course
+        mid_str = str(meeting_id).strip()
+        existing = get_course_for_meeting_id(mappings, mid_str)
+        if not existing:
+            mappings[mid_str] = course
             tmp = config_file.with_name(config_file.name + f".{os.getpid()}.tmp")
             with open(tmp, "w", encoding="utf-8") as f_out:
                 yaml.safe_dump(cfg, f_out, allow_unicode=True, sort_keys=False)
             os.replace(tmp, config_file)
-            log.info("meeting_id_mapped", extra={"meeting_id": meeting_id, "course": course})
+            log.info("meeting_id_mapped", extra={"meeting_id": mid_str, "course": course})
         else:
-            log.info("meeting_id_already_mapped", extra={"meeting_id": meeting_id, "existing": mappings[meeting_id]})
+            log.info("meeting_id_already_mapped", extra={"meeting_id": mid_str, "existing": existing})
 
 
 # ─── Decision logging ───────────────────────────────────────────────────────────

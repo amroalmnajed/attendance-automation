@@ -119,7 +119,11 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
     """Interactive wizard for Zoom attendance: CSV upload or API fetch."""
     from attendance.pipeline import run_zoom
     from attendance.zoom_api import list_recent_meeting_instances
-    from attendance.zoom_csv import extract_date_from_filename, extract_meeting_id_from_filename
+    from attendance.zoom_csv import (
+        extract_date_from_filename,
+        extract_meeting_id_from_filename,
+        get_course_for_meeting_id,
+    )
 
     cfg = _load_cfg(args.config)
     review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
@@ -182,7 +186,7 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
 
         # Look up course from mappings
         mappings = zoom_cfg.get("meeting_id_mappings") or {}
-        course = mappings.get(meeting_id)
+        course = get_course_for_meeting_id(mappings, meeting_id)
 
         if not course:
             valid_courses = ["crash", "main", "g10", "g9"]
@@ -278,7 +282,7 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
 
         # Look up course
         mappings = zoom_cfg.get("meeting_id_mappings") or {}
-        course = mappings.get(meeting_id)
+        course = get_course_for_meeting_id(mappings, meeting_id)
 
         if not course:
             valid_courses = ["crash", "main", "g10", "g9"]
@@ -552,7 +556,11 @@ def _parse_marks_with_preview(lines: list[str], *, always_confirm: bool, assume_
 
 def cmd_process_text(args: argparse.Namespace) -> None:
     from attendance.pipeline import run_text, run_zoom
-    from attendance.zoom_csv import extract_date_from_filename, extract_meeting_id_from_filename
+    from attendance.zoom_csv import (
+        extract_date_from_filename,
+        extract_meeting_id_from_filename,
+        get_course_for_meeting_id,
+    )
 
     cfg = _load_cfg(args.config)
 
@@ -608,7 +616,7 @@ def cmd_process_text(args: argparse.Namespace) -> None:
 
         # Look up course
         mappings = zoom_cfg.get("meeting_id_mappings") or {}
-        course = mappings.get(meeting_id)
+        course = get_course_for_meeting_id(mappings, meeting_id)
 
         if not course:
             valid_courses = ["crash", "main", "g10", "g9"]

@@ -19,13 +19,13 @@ from attendance.zoom_csv import (
     determine_session_type,
     extract_date_from_filename,
     extract_meeting_id_from_filename,
+    get_course_for_meeting_id,
 )
 
 from attendance.bot.common import (
     COURSES,
     ZOOM_CONFIRM,
     ZOOM_MEETING_ID,
-    ZOOM_PICK_INSTANCE,
     ZOOM_PICK_TYPE,
     ZOOM_SESSION_NUM,
     ZOOM_TEACHER_TIME,
@@ -121,7 +121,7 @@ async def handle_zoom_meeting_id_text(update: Update, context: ContextTypes.DEFA
     if text.lower() in COURSES:
         course = text.lower()
         # Find a meeting ID for this course
-        meeting_ids = [mid for mid, c in mappings.items() if c == course]
+        meeting_ids = [str(mid) for mid, c in mappings.items() if c == course]
         if not meeting_ids:
             await update.message.reply_text(
                 f"❌ No meeting ID mapped to course `{course}` yet.\n"
@@ -275,9 +275,16 @@ async def handle_zoom_instance_callback(update: Update, context: ContextTypes.DE
 async def handle_zoom_reprocess_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """zoom|reprocess|<filename> — user picked an archived CSV to reprocess."""
     query = update.callback_query
+    if query.data == "zoom|ignore":
+        await query.answer("To process other files, upload them directly via /zoom_upload.")
+        return ZOOM_MEETING_ID
+
     await query.answer()
 
-    filename = query.data.split("|", 2)[2]
+    parts = query.data.split("|", 2)
+    if len(parts) < 3:
+        return ZOOM_MEETING_ID
+    filename = parts[2]
     cfg = _load_cfg()
     zoom_cfg = cfg.get("attendance", {}).get("zoom_csv", {})
     archive_folder = zoom_cfg.get("archive_folder", "csv_archive")
@@ -300,7 +307,7 @@ async def handle_zoom_reprocess_callback(update: Update, context: ContextTypes.D
 
     # Look up course from mappings
     mappings = zoom_cfg.get("meeting_id_mappings") or {}
-    course = mappings.get(meeting_id)
+    course = get_course_for_meeting_id(mappings, meeting_id)
 
     if not course:
         await query.edit_message_text(
@@ -472,7 +479,7 @@ async def handle_zoom_csv_upload(update: Update, context: ContextTypes.DEFAULT_T
     cfg = _load_cfg()
     zoom_cfg = cfg.get("attendance", {}).get("zoom_csv", {})
     mappings = zoom_cfg.get("meeting_id_mappings") or {}
-    course = mappings.get(meeting_id)
+    course = get_course_for_meeting_id(mappings, meeting_id)
 
     if not course:
         # Ask user for course

@@ -15,3 +15,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q --basetemp=.pytest_cache"
 tmp_path_retention_count = 0
+filterwarnings = [
+    "ignore:.*per_message=False.*:telegram.warnings.PTBUserWarning",
+    "ignore:'_UnionGenericAlias' is deprecated.*:DeprecationWarning",
+]
