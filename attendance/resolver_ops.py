@@ -215,3 +215,149 @@ def resolve_item(
         alias_learned=alias_learned,
         error=None,
     )
+
+
+@dataclass
+class UndoResult:
+    success: bool
+    cleared: bool
+    re_enqueued: bool
+    error: Optional[str] = None
+
+
+def undo_resolution(
+    upload_id: str,
+    item_id: str,
+    queue: ReviewQueue,
+    writer: Any = None,
+    cfg: Optional[dict] = None,
+) -> UndoResult:
+    """Undo a previous resolution: clear the written cell and re-enqueue the item."""
+    if cfg is None:
+        from attendance.bot.common import _load_cfg
+        cfg = _load_cfg()
+
+    item = queue.get(upload_id, item_id)
+    if item is None:
+        for cand in queue._load(upload_id).get("items", []):
+            if cand.get("item_id", "").startswith(item_id):
+                item = cand
+                break
+
+    if item is None:
+        return UndoResult(
+            success=False,
+            cleared=False,
+            re_enqueued=False,
+            error=f"Item {item_id} not found in upload {upload_id}",
+        )
+
+    cleared = False
+    resolution = item.get("resolution") or {}
+    chosen_row = resolution.get("roster_row", 0)
+    roster_name = resolution.get("roster_name", item.get("raw_name", ""))
+
+    if chosen_row > 0:
+        course = item["course"]
+        session_num = item["session"]
+        session_type = item.get("session_type")
+
+        session_info = session_resolve(
+            course_key=course,
+            session_num=session_num,
+            session_type=session_type,
+            cfg=cfg,
+        )
+
+        cells = [
+            WriteCell(
+                roster_name=roster_name,
+                sheet_row=chosen_row,
+                col=session_info.session_col,
+                old_value=None,
+                new_value="",
+            )
+        ]
+
+        if session_info.type_col and session_type:
+            cells.append(WriteCell(
+                roster_name=roster_name,
+                sheet_row=chosen_row,
+                col=session_info.type_col,
+                old_value=None,
+                new_value="",
+            ))
+
+        batch_fn = getattr(writer, "batch_write", None) or batch_write
+        retry_cfg = (cfg.get("attendance", {}).get("write", {}) or {}).get("retry", {})
+        try:
+            batch_fn(
+                session_info,
+                cells,
+                upload_id=f"undo_{upload_id}",
+                dry_run=False,
+                retry_cfg=retry_cfg,
+            )
+            cleared = True
+        except Exception as exc:
+            log.error("undo_write_failed", extra={"upload_id": upload_id, "item_id": item_id, "error": str(exc)})
+            return UndoResult(
+                success=False,
+                cleared=False,
+                re_enqueued=False,
+                error=str(exc),
+            )
+
+    # Re-enqueue the item in queue
+    from attendance.ocr import OcrRow
+    from attendance.matcher import Candidate, MatchDecision, MatchResult, ReasonCode
+
+    ocr_row = OcrRow(
+        raw_name=item.get("raw_name", ""),
+        status_mark=item.get("raw_mark"),
+        confidence=item.get("ocr_confidence", 1.0),
+        row_index=item.get("paper_row_index", 0),
+        bounding_box=item.get("bounding_box"),
+        photo_index=item.get("photo_index"),
+    )
+    top3 = [
+        Candidate(
+            roster_name=t.get("roster_name", ""),
+            roster_row=t.get("roster_row", 0),
+            score=t.get("score", 0.0),
+        )
+        for t in item.get("top3", [])
+    ]
+    raw_reason = item.get("reason_code")
+    reason_code = ReasonCode.OCR_LOW_CONFIDENCE
+    if raw_reason:
+        for rc in ReasonCode:
+            if rc.value == raw_reason:
+                reason_code = rc
+                break
+
+    match_result = MatchResult(
+        decision=MatchDecision.REVIEW,
+        reason=reason_code,
+        best=top3[0] if top3 else None,
+        top3=top3,
+    )
+
+    queue.enqueue(
+        upload_id=upload_id,
+        course=item.get("course", ""),
+        session=item.get("session", 1),
+        image_ref=item.get("image_ref", ""),
+        ocr_row=ocr_row,
+        match_result=match_result,
+        raw_mark=item.get("raw_mark"),
+        session_type=item.get("session_type"),
+        reason=raw_reason,
+    )
+
+    return UndoResult(
+        success=True,
+        cleared=cleared,
+        re_enqueued=True,
+        error=None,
+    )

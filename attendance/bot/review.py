@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from attendance.normalizer import canonical_mark
 from attendance.review_queue import ReviewQueue
-from attendance.resolver_ops import resolve_item
+from attendance.resolver_ops import resolve_item, undo_resolution
 from attendance.session_resolver import resolve
 
 from attendance.bot.cards import escape_markdown, format_review_card
@@ -200,12 +200,108 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
         if not res.success:
             raise RuntimeError(res.error or "Resolution failed")
         await query.message.delete()
+
+        # Follow-up undo message with single inline button: ↩️ Undo (30 s)
+        undo_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("↩️ Undo (30 s)", callback_data=f"undo|{full_upload_id}|{target_item['item_id']}")]
+        ])
+        undo_msg = await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="✅ Resolution recorded.",
+            reply_markup=undo_kb,
+        )
+
+        if context.job_queue is not None:
+            context.job_queue.run_once(
+                _undo_timeout_job,
+                when=30,
+                data={
+                    "chat_id": query.message.chat_id,
+                    "message_id": undo_msg.message_id,
+                    "upload_id": full_upload_id,
+                    "item_id": target_item["item_id"],
+                },
+                name=f"undo_{full_upload_id}_{target_item['item_id']}",
+            )
+
         await _send_next_review_item(query.message.chat_id, context.bot, full_upload_id, review_dir)
     except Exception as exc:
         try:
             await query.edit_message_caption(caption=_user_error_message(exc, "sheet write"))
         except Exception:
             await query.edit_message_text(text=_user_error_message(exc, "sheet write"))
+
+
+async def _undo_timeout_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    data = context.job.data or {}
+    chat_id = data.get("chat_id")
+    message_id = data.get("message_id")
+    if chat_id and message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text="⏰ Undo window closed.",
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+
+
+@_guard("authorized")
+async def handle_undo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("undo|"):
+        return
+
+    parts = data.split("|")
+    if len(parts) != 3:
+        return
+    _, upload_id, item_id = parts
+
+    # Cancel scheduled timeout job
+    if context.job_queue is not None:
+        jobs = context.job_queue.get_jobs_by_name(f"undo_{upload_id}_{item_id}")
+        for j in jobs:
+            j.schedule_removal()
+
+    cfg = _load_cfg()
+    review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
+    loop = asyncio.get_running_loop()
+
+    def _do_undo():
+        from attendance import writer
+        queue = ReviewQueue(store_dir=review_dir)
+        full_uid = queue.find_by_prefix(upload_id) or upload_id
+        return undo_resolution(
+            upload_id=full_uid,
+            item_id=item_id,
+            queue=queue,
+            writer=writer,
+            cfg=cfg,
+        )
+
+    try:
+        res = await loop.run_in_executor(None, _do_undo)
+        if not res.success:
+            raise RuntimeError(res.error or "Undo failed")
+        try:
+            await query.edit_message_text(
+                text="↩️ Undone — item returned to review queue.",
+                reply_markup=None,
+            )
+        except Exception:
+            await query.message.reply_text("↩️ Undone — item returned to review queue.")
+    except Exception as exc:
+        log.error("undo_failed", extra={"upload_id": upload_id, "item_id": item_id, "error": str(exc)})
+        user_msg = _user_error_message(exc, "undo resolution")
+        try:
+            await query.edit_message_text(text=user_msg)
+        except Exception:
+            await query.message.reply_text(user_msg)
 
 
 # ─── Search flow ──────────────────────────────────────────────────────────────

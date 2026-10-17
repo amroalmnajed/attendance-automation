@@ -61,6 +61,7 @@ from attendance.bot.names import (
 from attendance.bot.review import (
     handle_resolution_callback,
     handle_search_callback,
+    handle_undo_callback,
     search_input_handler,
 )
 from attendance.bot.admin import (
@@ -196,6 +197,7 @@ def main() -> None:
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_resolution_callback, pattern=r"^res\|"))
+    app.add_handler(CallbackQueryHandler(handle_undo_callback,       pattern=r"^undo\|"))
     app.add_handler(CallbackQueryHandler(handle_revert_callback,     pattern=r"^rev\|"))
     app.add_handler(CallbackQueryHandler(handle_absent_callback,     pattern=r"^abs\|"))
     app.add_handler(CallbackQueryHandler(handle_upload_callback,     pattern=r"^up\|(?:overwrite|cancel)$"))

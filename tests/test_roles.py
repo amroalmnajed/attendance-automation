@@ -18,7 +18,7 @@ EXPECTED_LEVEL = {
                    "handle_names_course_callback", "handle_names_session_text", "handle_names_type_callback",
                    "handle_names_paste", "handle_names_done", "handle_names_confirm", "cancel_cmd",
                    "cmd_revert", "handle_revert_callback", "handle_absent_callback", "cmd_help",
-                   "handle_search_callback", "search_input_handler", "handle_resolution_callback",
+                   "handle_search_callback", "search_input_handler", "handle_resolution_callback", "handle_undo_callback",
                    "cmd_report", "cmd_streaks", "cmd_pending", "cmd_aliases", "cmd_health",
                    "cmd_zoom_fetch", "cmd_zoom_upload", "cmd_zoom_reprocess",
                    "handle_zoom_meeting_id_text", "handle_zoom_course_callback",
