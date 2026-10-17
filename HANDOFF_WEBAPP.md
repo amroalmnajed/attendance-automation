@@ -35,7 +35,7 @@ yourself and write the baseline count under "Log" before changing anything.
 |---|---|---|
 | W1 | Scaffold `webapp/` + config + auth gate | ✅ |
 | W2 | Photo upload & process screen (`pipeline.run`/`run_multi`) | ✅ |
-| W3 | Paste-names screen (`pipeline.run_text`) | ⬜ |
+| W3 | Paste-names screen (`pipeline.run_text`) | ✅ |
 | W4 | Zoom ingestion screen (`pipeline.run_zoom`) | ⬜ |
 | W5 | Review queue screen (real SQLite queue + `resolve_item`) | ⬜ |
 | W6 | Attendance viewer & reporting | ⬜ |
@@ -84,3 +84,4 @@ yourself and write the baseline count under "Log" before changing anything.
 - **Baseline:** 591/593 tests passing (2 pre-existing failures: test_alias_management.py::test_command_is_admins_only_when_no_admin_is_configured, test_zoom_bot.py::test_zoom_unauthorized_user_refusal)
 - **W1 done:** `webapp/__init__.py`, `config.py` (CourseConfig + _secret + COURSES; reads attendance.yaml, falls back to crash/main/g9/g10), `app.py` (auth gate with name field for audit trail, course selector sidebar, page stubs for W2-W7), `.streamlit/config.toml`, `.streamlit/secrets.toml.example`, `.env.example`, `requirements.txt`. Tests: `tests/test_webapp_config.py` (12 tests covering _secret, CourseConfig, COURSES, CONFIG_PATH — all pure-Python, no Streamlit server needed). **Gotcha:** `webapp/` is NOT a `dashboard/` replacement yet — all page bodies are stubs; do not remove `dashboard/` until W11.
 - **W2 done:** `webapp/pages/upload.py` (photo upload UI with course/session/dry-run controls, calls pipeline.run/run_multi with progress callback, renders RunSummary with matched/flagged/written counts and review queue link), `webapp/pages/__init__.py`. Updated `webapp/app.py` to import and call the upload page renderer. Tests: `tests/test_webapp_upload.py` (6 tests covering render_summary logic with various RunSummary states — basic, flagged, dry-run, errors, session stats, absent offer). **Gotcha:** Dry-run toggle defaults to ON per Rule 7; multiple photos are saved to temp dir before calling run_multi.
+- **W3 done:** `webapp/pages/names.py` (paste-names UI with textarea for name|mark lines, uses attendance.marks.parse_lines/split_names_and_marks/format_preview/has_issues, shows preview-before-submit UX matching bot's /done flow, confirms before processing when marks are unrecognized, calls pipeline.run_text with progress callback). Updated `webapp/app.py` to import and call the names page renderer. Tests: `tests/test_webapp_names.py` (11 tests covering parse_lines, split_names_and_marks, has_issues, format_preview with various inputs — basic names, marks, default marks, unrecognized marks, empty lines, whitespace). **Gotcha:** Reuses the same render_summary function from upload.py for consistency.

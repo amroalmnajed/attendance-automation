@@ -147,8 +147,8 @@ def _page_upload() -> None:
 
 
 def _page_names() -> None:
-    st.header("✏️ Paste Names")
-    st.info("Paste-names screen (W3) — calls `attendance.pipeline.run_text()`.")
+    from webapp.pages.names import _page_names as render_names
+    render_names()
 
 
 def _page_zoom() -> None:
