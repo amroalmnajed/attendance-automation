@@ -22,7 +22,7 @@ Phase 4: Step-by-step setup, environment configuration, scheduling, and go-live 
 ## 2. Service Account Setup
 
 ### 2a. Enable APIs
-In your Google Cloud project (`attendance-511005`), enable:
+In your Google Cloud project, enable:
 - Google Sheets API
 - Google Drive API
 
@@ -30,9 +30,9 @@ In your Google Cloud project (`attendance-511005`), enable:
 https://console.cloud.google.com/apis/library
 ```
 
-### 2b. Service account is already created
-The service account `attendance-sheet-bot@attendance-511005.iam.gserviceaccount.com`
-exists with key file `attendance-511005-781e52a31316.json`.
+### 2b. Create a service account
+Create a service account in your Google Cloud project (e.g., with suffix `-sheet-bot`).
+Download the JSON key file and store it securely (see `.env.example`).
 
 Least-privilege IAM roles needed (do **not** grant broader roles):
 - No project-level IAM role needed — the SA gets access only via sheet sharing (step 2c).
@@ -41,16 +41,10 @@ Least-privilege IAM roles needed (do **not** grant broader roles):
 All four sheets must be shared with the service account as **Editor**:
 
 ```
-Share → Add: attendance-sheet-bot@attendance-511005.iam.gserviceaccount.com → Editor
+Share → Add: <your-service-account-email> → Editor
 ```
 
-Sheets:
-- `1nOTft1CH6OTh3cVkc2c1ZOqD-m1v7jCYM1gxIb7oRnM` (Crash)
-- `1pyrm_USZr66t_V7y6R-F-JJ8wJ8kdOzrsJ-bbDX11BY` (Main)
-- `1vuOBu3JJqWUa0uCY6rmdwJbkZeqJ6QPhx6519gvQS10` (G10)
-- `1CcudM6UbwRQK8Ro3wHg6j9aHhvYGyCqt3gzl4JSTBJU` (G9)
-
-✓ Already done per project setup.
+Replace `<your-service-account-email>` with the email from your service account (format: `service-account-name@project-id.iam.gserviceaccount.com`).
 
 ---
 
@@ -77,14 +71,16 @@ python -c "import gspread, rapidfuzz, cv2, google.generativeai; print('OK')"
 
 All secrets live in `.env` at the project root. **Never commit `.env` to git.**
 
-```dotenv
-# .env  (already populated — do not share this file)
-GOOGLE_APPLICATION_CREDENTIALS=attendance-511005-781e52a31316.json
+Copy `.env.example` to `.env` and fill in your actual values:
 
-CRASH_SHEET_ID=1nOTft1CH6OTh3cVkc2c1ZOqD-m1v7jCYM1gxIb7oRnM
-MAIN_SHEET_ID=1pyrm_USZr66t_V7y6R-F-JJ8wJ8kdOzrsJ-bbDX11BY
-G10_SHEET_ID=1vuOBu3JJqWUa0uCY6rmdwJbkZeqJ6QPhx6519gvQS10
-G9_SHEET_ID=1CcudM6UbwRQK8Ro3wHg6j9aHhvYGyCqt3gzl4JSTBJU
+```dotenv
+# .env  (copy from .env.example and fill in real values)
+GOOGLE_APPLICATION_CREDENTIALS=your-service-account-key.json
+
+CRASH_SHEET_ID=<your-crash-sheet-id>
+MAIN_SHEET_ID=<your-main-sheet-id>
+G10_SHEET_ID=<your-g10-sheet-id>
+G9_SHEET_ID=<your-g9-sheet-id>
 
 GEMINI_API_KEY=<your-key-from-aistudio.google.com>
 
@@ -101,7 +97,7 @@ NOTIFY_TO=you@gmail.com
 ### Verify env is loaded correctly:
 ```powershell
 python -c "from dotenv import load_dotenv; import os; load_dotenv(override=True); print(os.getenv('CRASH_SHEET_ID'))"
-# Expected: 1nOTft1CH6OTh3cVkc2c1ZOqD-m1v7jCYM1gxIb7oRnM
+# Expected: your crash sheet ID
 ```
 
 ---
@@ -112,11 +108,11 @@ Run the discovery script to confirm the service account has access and headers a
 
 ```powershell
 # Set env vars in PowerShell (already in .env but useful for one-off checks)
-$env:GOOGLE_APPLICATION_CREDENTIALS="attendance-511005-781e52a31316.json"
-$env:CRASH_SHEET_ID="1nOTft1CH6OTh3cVkc2c1ZOqD-m1v7jCYM1gxIb7oRnM"
-$env:MAIN_SHEET_ID="1pyrm_USZr66t_V7y6R-F-JJ8wJ8kdOzrsJ-bbDX11BY"
-$env:G10_SHEET_ID="1vuOBu3JJqWUa0uCY6rmdwJbkZeqJ6QPhx6519gvQS10"
-$env:G9_SHEET_ID="1CcudM6UbwRQK8Ro3wHg6j9aHhvYGyCqt3gzl4JSTBJU"
+$env:GOOGLE_APPLICATION_CREDENTIALS="your-service-account-key.json"
+$env:CRASH_SHEET_ID="<your-crash-sheet-id>"
+$env:MAIN_SHEET_ID="<your-main-sheet-id>"
+$env:G10_SHEET_ID="<your-g10-sheet-id>"
+$env:G9_SHEET_ID="<your-g9-sheet-id>"
 
 python discover_sheets.py
 ```
@@ -299,7 +295,7 @@ PRE-LAUNCH
 [ ] pip install -r requirements.txt succeeded (no errors)
 [ ] .env populated with all 4 sheet IDs, GOOGLE_APPLICATION_CREDENTIALS, GEMINI_API_KEY
 [ ] Service account JSON file present at path in GOOGLE_APPLICATION_CREDENTIALS
-[ ] All 4 sheets shared as Editor with attendance-sheet-bot@attendance-511005.iam.gserviceaccount.com
+[ ] All 4 sheets shared as Editor with your service account email
 [ ] python discover_sheets.py runs cleanly (no auth errors, all 4 sheets discovered)
 [ ] pytest tests/ → all tests pass
 [ ] python tests/eval_matcher.py → false-accept rate = 0%

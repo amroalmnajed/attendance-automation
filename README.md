@@ -8,9 +8,11 @@ Uncertain matches go to a review queue that an admin resolves from Telegram (or 
 ## Run
 
 1. Python 3.12 (see `.python-version`), then `pip install -r requirements.txt`.
-2. Create `.env` with `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, the `*_SHEET_ID` values and Google
-   credentials (`GOOGLE_APPLICATION_CREDENTIALS`, or `GOOGLE_CREDENTIALS_B64` on Railway).
-3. Edit `config/attendance.yaml` (courses, thresholds, `dry_run_default`, admin/teacher Telegram IDs).
+2. Copy `.env.example` to `.env` and fill in your actual values (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`,
+   the `*_SHEET_ID` values and Google credentials (`GOOGLE_APPLICATION_CREDENTIALS`, or
+   `GOOGLE_CREDENTIALS_B64` on Railway)).
+3. Edit `config/attendance.yaml` (courses, thresholds, `dry_run_default`, admin/teacher Telegram IDs,
+   Zoom meeting IDs, teacher name).
 4. Start the bot: `python -m attendance.ingest`
 
 `dry_run_default: false` means the bot writes to the real sheets. Set it to `true` to rehearse.
@@ -72,7 +74,7 @@ Upload Zoom participant CSV files manually via Telegram.
 - `/zoom_reprocess` - Reprocess an archived CSV file
 
 **Teacher Detection:**
-- Teacher name is configured as "Yaman" (configurable in `attendance.yaml`)
+- Teacher name is configured in `config/attendance.yaml` (update the `teacher_name` field)
 - Uses fuzzy matching to detect teacher variations (e.g., "Yaman (iPad)", "Yaman (iPhone)")
 - If teacher is not found, the system prompts for manual meeting start time
 - Teacher's presence affects the effective start time (configured buffer of 5 minutes)

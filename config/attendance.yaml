@@ -49,7 +49,7 @@ attendance:
   # Bot authorized users. IDs here are added to the AUTHORIZED_TELEGRAM_IDS env var
   # (comma-separated). If NO authorized user is configured, everyone is allowed.
   authorized:
-    telegram_ids: [5674439345]
+    telegram_ids: []
 
   # Feature 12: missing-attendance reminders. OFF unless enabled. Needs python-telegram-bot[job-queue].
   # Uses core.app.timezone. A reminder is sent once per expected class if no upload is recorded for that
@@ -179,11 +179,11 @@ attendance:
   zoom_csv:
     enabled: true
     meeting_id_mappings:
-      "81795786552": main
-      "83570905451": g10
-      "81887392957": crash
-      "82572049402": g9
-    teacher_name: "Yaman"
+      "<your-main-meeting-id>": main
+      "<your-g10-meeting-id>": g10
+      "<your-crash-meeting-id>": crash
+      "<your-g9-meeting-id>": g9
+    teacher_name: "Your Teacher Name"
     teacher_fuzzy_match_threshold: 80
     teacher_join_buffer_minutes: 5
     late_threshold_minutes: 15
