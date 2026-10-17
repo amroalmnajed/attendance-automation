@@ -131,6 +131,12 @@ def main() -> None:
     except Exception as exc:
         log.warning("bot_access_check_failed", extra={"error": type(exc).__name__})
 
+    try:   # T9: Secret rotation health check at startup
+        from attendance.health_checks import check_secrets
+        check_secrets(_load_cfg())
+    except Exception as exc:
+        log.warning("secret_health_check_failed", extra={"error": type(exc).__name__})
+
     app = ApplicationBuilder().token(token).post_init(post_init).build()
 
     conv_handler = ConversationHandler(
