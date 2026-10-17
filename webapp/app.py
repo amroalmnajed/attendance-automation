@@ -152,11 +152,8 @@ def _page_names() -> None:
 
 
 def _page_zoom() -> None:
-    st.header("🎦 Zoom Ingestion")
-    st.info(
-        "Zoom ingestion screen (W4) — "
-        "calls `attendance.pipeline.run_zoom()` (meeting ID or CSV upload)."
-    )
+    from webapp.pages.zoom import _page_zoom as render_zoom
+    render_zoom()
 
 
 def _page_review() -> None:
