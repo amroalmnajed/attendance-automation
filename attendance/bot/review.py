@@ -9,7 +9,8 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
 
 from attendance.normalizer import canonical_mark
-from attendance.review_queue import ReviewQueue, resolve_item
+from attendance.review_queue import ReviewQueue
+from attendance.resolver_ops import resolve_item
 from attendance.session_resolver import resolve
 
 from attendance.bot.cards import escape_markdown, format_review_card
@@ -153,11 +154,6 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_caption(caption="✅ Item already resolved.")
         return
 
-    course       = target_item["course"]
-    # Blocking Sheets I/O: keep it off the event loop (see HANDOFF.md #16).
-    session_info = await asyncio.get_running_loop().run_in_executor(
-        None, lambda: resolve(course, target_item["session"], target_item.get("session_type"), cfg))
-
     roster_row       = 0
     roster_name      = "IGNORED"
     attendance_value = "Absent"
@@ -175,31 +171,34 @@ async def handle_resolution_callback(update: Update, context: ContextTypes.DEFAU
         roster_name      = next((m["roster_name"] for m in target_item["top3"] if m["roster_row"] == roster_row), "Unknown")
         attendance_value = canonical_mark(target_item.get("raw_mark"))
 
-    def _do_write():
-        if roster_row > 0:
-            resolve_item(
-                item=target_item,
-                roster_row=roster_row,
-                roster_name=roster_name,
-                attendance_value=attendance_value,
-                session_info=session_info,
-                cfg=cfg,
-                upload_id=full_upload_id,
-                dry_run=cfg["core"]["app"].get("dry_run_default", True),
-                resolved_by="telegram",
-            )
+    def _do_resolve():
+        from attendance.aliases import AliasStore
+        from attendance import writer
 
-        queue.resolve(
-            full_upload_id,
-            item_id,
-            chosen_roster_row=roster_row,
-            chosen_roster_name=roster_name,
+        match_cfg = cfg.get("attendance", {}).get("match", {})
+        alias_store = AliasStore(
+            path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
+            min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
+        )
+
+        return resolve_item(
+            upload_id=full_upload_id,
+            item_id=target_item["item_id"],
+            chosen_row=roster_row,
+            queue=queue,
+            writer=writer,
+            alias_store=alias_store,
+            cfg=cfg,
+            dry_run=cfg["core"]["app"].get("dry_run_default", True),
             attendance_value=attendance_value,
+            roster_name=roster_name,
             resolved_by="telegram",
         )
 
     try:
-        await loop.run_in_executor(None, _do_write)
+        res = await loop.run_in_executor(None, _do_resolve)
+        if not res.success:
+            raise RuntimeError(res.error or "Resolution failed")
         await query.message.delete()
         await _send_next_review_item(query.message.chat_id, context.bot, full_upload_id, review_dir)
     except Exception as exc:

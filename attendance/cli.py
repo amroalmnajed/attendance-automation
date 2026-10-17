@@ -743,53 +743,42 @@ def cmd_review_list(args: argparse.Namespace) -> None:
 
 
 def cmd_review_resolve(args: argparse.Namespace) -> None:
-    from attendance.review_queue import ReviewQueue, resolve_item
-    from attendance.session_resolver import resolve
+    from attendance import writer
+    from attendance.aliases import AliasStore
+    from attendance.resolver_ops import resolve_item
+    from attendance.review_queue import ReviewQueue
 
     cfg = _load_cfg(args.config)
     rq = ReviewQueue(store_dir=cfg["attendance"]["review"].get("local_dir", "review_queue"))
 
-    item = rq.get(args.upload_id, args.item_id)
-    if item is None:
-        sys.exit(f"Item {args.item_id} not found in upload {args.upload_id}")
-    if item.get("status") == "resolved":
-        sys.exit(f"Item {args.item_id} already resolved")
-
-    course = item["course"]
-    session_info = resolve(
-        course_key=course,
-        session_num=item["session"],
-        session_type=None,
-        cfg=cfg,
+    match_cfg = cfg.get("attendance", {}).get("match", {})
+    alias_store = AliasStore(
+        path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
+        min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
     )
-    roster_name = args.roster_name or f"row {args.roster_row}"
 
-    # Write the sheet FIRST; only mark resolved once the write succeeded (raises on failure),
-    # so a failed write leaves the item pending instead of silently lost.
-    resolve_item(
-        item=item,
-        roster_row=args.roster_row,
-        roster_name=roster_name,
-        attendance_value=args.value,
-        session_info=session_info,
-        cfg=cfg,
+    result = resolve_item(
         upload_id=args.upload_id,
+        item_id=args.item_id,
+        chosen_row=args.roster_row,
+        queue=rq,
+        writer=writer,
+        alias_store=alias_store,
+        cfg=cfg,
         dry_run=args.dry_run,
+        attendance_value=args.value,
+        roster_name=args.roster_name,
         resolved_by="cli",
     )
+
+    if not result.success:
+        if result.error:
+            raise RuntimeError(result.error)
+        sys.exit(1)
 
     if args.dry_run:
         print("No cells written (dry-run).")
         return
-
-    rq.resolve(
-        upload_id=args.upload_id,
-        item_id=args.item_id,
-        chosen_roster_row=args.roster_row,
-        chosen_roster_name=roster_name,
-        attendance_value=args.value,
-        resolved_by="cli",
-    )
 
     print(f"✓ Resolved: row {args.roster_row} → '{args.value}'")
 

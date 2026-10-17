@@ -64,6 +64,8 @@ class AliasStore:
             atomic_write_json(self._path, data)
             self._touch_meta({(course, key)}, "last_confirmed")
 
+    add = learn
+
     # ── Feature 7: dates, listing, removal, export ────────────────────────────
 
     def _load_meta(self) -> dict:
