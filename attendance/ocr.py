@@ -1,6 +1,10 @@
 """attendance/ocr.py — OCR provider interface + Gemini Flash implementation.
 
-The OcrProvider ABC lets you swap providers via one config line.
+The OcrProvider Protocol lets you swap providers via one config line.
+Both GeminiProvider and TesseractProvider (attendance/ocr_tesseract.py)
+satisfy it; any object with a compatible ``read`` method also satisfies it
+structurally (no inheritance required).
+
 The GeminiProvider sends the preprocessed image to Gemini with a strict
 JSON-schema prompt and returns:
   [{raw_name: str, status_mark: str | null, confidence: float}]
@@ -11,9 +15,8 @@ import base64
 import json
 import os
 import re
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 
 from attendance import health
@@ -46,17 +49,26 @@ class OcrRow:
 
 # ─── Abstract interface ───────────────────────────────────────────────────────
 
-class OcrProvider(ABC):
-    @abstractmethod
-    def read(self, image_bytes: bytes, roster: Optional[list[str]] = None) -> list[OcrRow]:
-        """Read the attendance sheet image and return structured rows.
+@runtime_checkable
+class OcrProvider(Protocol):
+    """Structural protocol for OCR providers.
 
-        `roster`, when given, is the full list of canonical student names for
-        this course/session. Passing it lets the model match handwriting to a
-        specific real name instead of guessing a transliteration in isolation —
-        this is what actually resolves ambiguous/partial names; plain string
-        similarity on a blind transliteration can't.
-        """
+    Any class with a compatible ``read`` method satisfies this protocol
+    without needing to subclass it.  Both ``GeminiProvider`` and
+    ``TesseractProvider`` implement it.
+
+    Parameters passed to ``read``:
+        image_bytes  – raw bytes of the preprocessed attendance-sheet photo.
+        roster       – optional list of canonical student names for the course.
+                       Providers may use it to constrain or verify matches.
+
+    Returns a list of :class:`OcrRow` (one per student line found on the sheet).
+    Raises :exc:`OcrUnavailableError` when the provider cannot produce a
+    usable response and the caller should try a fallback.
+    """
+
+    def read(self, image_bytes: bytes, roster: Optional[list[str]] = None) -> list[OcrRow]:
+        """Read the attendance sheet image and return structured rows."""
         ...
 
 
@@ -426,7 +438,13 @@ class MockProvider(OcrProvider):
 # ─── Factory ──────────────────────────────────────────────────────────────────
 
 def build_provider(cfg: dict) -> OcrProvider:
-    """Build the OCR provider from the config dict (attendance.ocr section)."""
+    """Build the OCR provider from the config dict (attendance.ocr section).
+
+    Supported values for ``provider``:
+        ``"gemini"``      – Gemini Flash (default, cloud, best accuracy).
+        ``"tesseract"``   – Tesseract (offline, CPU; requires system package).
+        ``"mock"``        – Fixed rows for tests / dry-run demos.
+    """
     provider_name = cfg.get("provider", "gemini")
     model = cfg.get("model", "gemini-3.1-flash-lite")
     min_conf = float(cfg.get("min_confidence", 0.75))
@@ -438,7 +456,13 @@ def build_provider(cfg: dict) -> OcrProvider:
             timeout_s=float(cfg.get("timeout_s", 60)),
             max_attempts=int(cfg.get("max_attempts", 3)),
         )
+    elif provider_name == "tesseract":
+        from attendance.ocr_tesseract import TesseractProvider
+        return TesseractProvider(
+            lang=cfg.get("tesseract_lang", "eng"),
+            tesseract_cmd=cfg.get("tesseract_cmd") or None,
+        )
     elif provider_name == "mock":
         return MockProvider()
 
-    raise ValueError(f"Unknown OCR provider: {provider_name!r}. Supported: gemini, mock")
+    raise ValueError(f"Unknown OCR provider: {provider_name!r}. Supported: gemini, tesseract, mock")

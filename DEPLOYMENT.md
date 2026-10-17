@@ -358,3 +358,50 @@ There is no automatic rollback command. Add one if needed for production.
 5. Alerts: default thresholds are on. Alerts go only to admins. Lower `gemini_threshold` / `sheets_threshold` if you want earlier warnings.
 6. If the original zip with `.env`, the service-account key or the SSH keys was ever shared or committed, rotate those secrets now.
 
+## 16. OCR Fallback — Tesseract
+
+When Gemini is unavailable (quota exhausted, network outage) the bot can fall
+back to Tesseract, an offline CPU-based OCR engine.
+
+> **Accuracy warning**: Tesseract accuracy on handwritten Arabic/English names
+> is *significantly* lower than Gemini.  Expect more items to land in the
+> review queue.  Use this only as a last resort.
+
+### 16a. Install Tesseract
+
+| Platform | Command |
+|---|---|
+| Ubuntu / Debian | `sudo apt-get install -y tesseract-ocr` |
+| macOS | `brew install tesseract` |
+| Windows | Download from [UB-Mannheim](https://github.com/UB-Mannheim/tesseract/wiki); add install dir to `PATH` |
+| Railway (nixpacks) | Add `apt = ["tesseract-ocr"]` to `nixpacks.toml` |
+
+### 16b. Enable in config
+
+```yaml
+# config/attendance.yaml
+attendance:
+  ocr:
+    fallback_to_tesseract: true   # fall back to Tesseract when Gemini fails
+    tesseract_lang: eng            # OCR language; use "ara" for Arabic-only sheets
+    # tesseract_cmd: /usr/bin/tesseract  # override binary path if not on PATH
+```
+
+You can also set `provider: tesseract` to use Tesseract as the *primary*
+provider (e.g., for fully offline deployments):
+
+```yaml
+attendance:
+  ocr:
+    provider: tesseract
+    tesseract_lang: eng
+```
+
+### 16c. Verify
+
+```powershell
+tesseract --version      # should print version 4.x or 5.x
+python -c "import pytesseract; pytesseract.get_tesseract_version(); print('OK')"
+```
+
+

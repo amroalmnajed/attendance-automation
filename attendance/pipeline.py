@@ -844,9 +844,34 @@ def _needs_second_look(row, min_conf: float, roster_aware: bool, include_unmatch
 
 
 def _read_sheet(*, dry_run: bool = False, **kwargs) -> list[OcrRow]:
-    """OCR one sheet. Dry runs record no health events (see attendance/health.py)."""
+    """OCR one sheet. Dry runs record no health events (see attendance/health.py).
+
+    When ``ocr_cfg.fallback_to_tesseract`` is ``true`` and the primary provider
+    raises :exc:`~attendance.ocr.OcrUnavailableError`, the call is retried with
+    :class:`~attendance.ocr_tesseract.TesseractProvider`.  A clear warning is
+    logged because Tesseract accuracy on handwritten names is significantly lower
+    than Gemini.
+    """
+    from attendance.ocr import OcrUnavailableError
+    ocr_cfg: dict = kwargs.get("ocr_cfg", {})
     with health_mod.dry_run_scope(dry_run):
-        return _read_sheet_inner(**kwargs)
+        try:
+            return _read_sheet_inner(**kwargs)
+        except OcrUnavailableError:
+            if not ocr_cfg.get("fallback_to_tesseract", False):
+                raise
+            log.warning(
+                "ocr_gemini_unavailable_falling_back_to_tesseract",
+                extra={"detail": "⚠️ Using Tesseract fallback — expect more review-queue items."},
+            )
+            from attendance.ocr_tesseract import TesseractProvider
+            tesseract_provider = TesseractProvider(
+                lang=ocr_cfg.get("tesseract_lang", "eng"),
+                tesseract_cmd=ocr_cfg.get("tesseract_cmd") or None,
+            )
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs["provider"] = tesseract_provider
+            return _read_sheet_inner(**fallback_kwargs)
 
 
 def _avg_confidence(rows: list[OcrRow]) -> float:
