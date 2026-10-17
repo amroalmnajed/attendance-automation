@@ -16,7 +16,13 @@ from typing import Optional
 
 from attendance import health
 from attendance._net import retry_call
-from attendance.session_resolver import SheetSession, invalidate as invalidate_session_cache
+from attendance.session_resolver import (
+    SheetSession,
+    _col_letter_to_index,
+    _get_client,
+    _open_worksheet,
+    invalidate as invalidate_session_cache,
+)
 from core.logger import audit_write, get_logger
 
 log = get_logger("writer")
@@ -56,6 +62,87 @@ def _with_backoff(
         fn, op=op, max_attempts=max_attempts, base_s=base_s, cap_s=cap_s,
         jitter=jitter, context=context,
     )
+
+
+def check_existing(
+    sheet_id: str,
+    tab: str,
+    row_numbers: list[int | WriteCell] | set[int],
+    cfg: Optional[dict | str] = None,
+    col: Optional[str] = None,
+) -> bool:
+    """Read target cells from the sheet. Returns True if any target cell is non-empty.
+
+    Uses the cached gspread client from session_resolver.
+    """
+    if isinstance(cfg, str) and col is None:
+        col = cfg
+        cfg = None
+    if col is None and isinstance(cfg, dict):
+        col = cfg.get("col") or cfg.get("session_col")
+
+    if not row_numbers:
+        return False
+
+    retry_kw = {}
+    if isinstance(cfg, dict) and "attendance" in cfg and "write" in cfg["attendance"]:
+        retry_kw = cfg["attendance"]["write"].get("retry", {})
+    elif isinstance(cfg, dict) and "retry" in cfg:
+        retry_kw = cfg["retry"]
+
+    gc = _get_client(retry_kw)
+    ws = _open_worksheet(gc, sheet_id, tab, retry_kw)
+
+    first_elem = next(iter(row_numbers))
+    if isinstance(first_elem, WriteCell):
+        cols_needed = {c.col for c in row_numbers if isinstance(c, WriteCell)}
+        for c_letter in cols_needed:
+            col_idx = _col_letter_to_index(c_letter)
+            col_vals = ws.col_values(col_idx)
+            for c in row_numbers:
+                if isinstance(c, WriteCell) and c.col == c_letter:
+                    r = c.sheet_row
+                    if 1 <= r <= len(col_vals):
+                        v = col_vals[r - 1]
+                        if v and str(v).strip():
+                            return True
+        return False
+
+    if col is not None:
+        col_idx = _col_letter_to_index(col) if isinstance(col, str) and not str(col).isdigit() else int(col)
+        col_vals = ws.col_values(col_idx)
+        for r in row_numbers:
+            row_idx = int(r)
+            if 1 <= row_idx <= len(col_vals):
+                v = col_vals[row_idx - 1]
+                if v and str(v).strip():
+                    return True
+        return False
+
+    # Fallback if col not specified: try col 1 or all values
+    try:
+        col_vals = ws.col_values(1)
+        for r in row_numbers:
+            row_idx = int(r)
+            if 1 <= row_idx <= len(col_vals):
+                v = col_vals[row_idx - 1]
+                if v and str(v).strip():
+                    return True
+    except Exception:
+        pass
+
+    try:
+        all_vals = ws.get_all_values()
+        for r in row_numbers:
+            row_idx = int(r)
+            if 1 <= row_idx <= len(all_vals):
+                row_vals = all_vals[row_idx - 1]
+                if any(v and str(v).strip() for v in row_vals):
+                    return True
+    except Exception:
+        pass
+
+    return False
 
 
 # ─── Writer ───────────────────────────────────────────────────────────────────

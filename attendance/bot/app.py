@@ -198,6 +198,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_resolution_callback, pattern=r"^res\|"))
     app.add_handler(CallbackQueryHandler(handle_revert_callback,     pattern=r"^rev\|"))
     app.add_handler(CallbackQueryHandler(handle_absent_callback,     pattern=r"^abs\|"))
+    app.add_handler(CallbackQueryHandler(handle_upload_callback,     pattern=r"^up\|(?:overwrite|cancel)$"))
     app.add_handler(CommandHandler("report",  cmd_report))
     app.add_handler(CommandHandler("streaks", cmd_streaks))
     app.add_handler(CommandHandler("revert",  cmd_revert))

@@ -14,7 +14,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
 
+from datetime import datetime
+
 from attendance.pipeline import run, run_multi
+from attendance.session_resolver import resolve
+from attendance.writer import check_existing
 
 from attendance.bot.common import (
     COURSES,
@@ -252,10 +256,39 @@ async def handle_upload_callback(update: Update, context: ContextTypes.DEFAULT_T
         loop.create_task(_run_pipeline_flow(update, context, query.message.chat_id))
         return ConversationHandler.END
 
+    elif action == "overwrite":
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run_pipeline_flow(update, context, query.message.chat_id, force=True))
+        return ConversationHandler.END
+
+    elif action == "cancel":
+        try:
+            await query.edit_message_text("Cancelled. No changes made.")
+        except Exception:
+            await query.message.reply_text("Cancelled. No changes made.")
+        tmp_paths = list(context.user_data.get("image_paths") or [])
+        img_path = context.user_data.get("image_path")
+        for tmp in {p for p in [*tmp_paths, img_path] if p}:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        context.user_data.clear()
+        return ConversationHandler.END
+
     return PHOTO_FLOW
 
 
-async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+async def _run_pipeline_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    force: bool = False,
+) -> None:
     # Runs as a fire-and-forget task: an uncaught exception here would vanish and leave
     # the user staring at "Processing…", so EVERYTHING is inside the try.
     img_path = context.user_data.get("image_path")
@@ -263,12 +296,51 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
     status_msg = None
     summary = None
     review_dir = "review_queue"
+    cleanup_needed = True
     try:
         course, session_num, utype, img_path = _require(
             context.user_data, "course", "session", "type", "image_path")
         session_type = utype if utype != "Not Set" else None
         if not tmp_paths:
             tmp_paths = [img_path]
+
+        cfg = _load_cfg()
+
+        # Duplicate sheet upload guard
+        course_cfg = cfg.get("attendance", {}).get("courses", {}).get(course)
+        if not force and course_cfg:
+            try:
+                session_info = resolve(course, session_num, session_type, cfg)
+                row_nums = [r for _, r in session_info.roster]
+                exists = await _run_blocking(
+                    lambda: check_existing(
+                        session_info.sheet_id,
+                        session_info.tab,
+                        row_nums,
+                        cfg=cfg,
+                        col=session_info.session_col,
+                    )
+                )
+                if exists:
+                    cleanup_needed = False
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    warn_text = (
+                        f"⚠️ Attendance already exists for {course.upper()} Session {session_num} on {today_str}."
+                    )
+                    kb = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("✅ Overwrite", callback_data="up|overwrite"),
+                            InlineKeyboardButton("❌ Cancel", callback_data="up|cancel"),
+                        ]
+                    ])
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=warn_text,
+                        reply_markup=kb,
+                    )
+                    return
+            except Exception as exc:
+                log.warning("check_existing_failed", extra={"error": str(exc), "course": course})
 
         status_msg = await context.bot.send_message(
             chat_id=chat_id,
@@ -280,7 +352,6 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
         except Exception:
             pass  # cosmetic only
 
-        cfg = _load_cfg()
         review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
 
         review_images_dir = Path("review_images")
@@ -300,7 +371,7 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     session_num=session_num,
                     session_type=session_type,
                     dry_run=cfg["core"]["app"].get("dry_run_default", True),
-                    force=False,
+                    force=force,
                     config_path="config/attendance.yaml",
                     review_store_dir=review_dir,
                     progress=progress,
@@ -315,7 +386,7 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     session_num=session_num,
                     session_type=session_type,
                     dry_run=cfg["core"]["app"].get("dry_run_default", True),
-                    force=False,
+                    force=force,
                     config_path="config/attendance.yaml",
                     review_store_dir=review_dir,
                     progress=progress,
@@ -333,9 +404,10 @@ async def _run_pipeline_flow(update: Update, context: ContextTypes.DEFAULT_TYPE,
             pass
         await _deliver_summary(chat_id, context.bot, summary, review_dir)
     finally:
-        for tmp in {p for p in [*tmp_paths, img_path] if p}:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-        context.user_data.clear()
+        if cleanup_needed:
+            for tmp in {p for p in [*tmp_paths, img_path] if p}:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            context.user_data.clear()
