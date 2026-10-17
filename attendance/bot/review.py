@@ -253,32 +253,36 @@ async def search_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             return None, None, None
         return full_uid, queue, queue.list_pending(full_uid)
 
-    full_upload_id, queue, pending = await loop.run_in_executor(None, _find_upload)
+    try:
+        full_upload_id, queue, pending = await loop.run_in_executor(None, _find_upload)
 
-    if not full_upload_id:
-        await update.message.reply_text("❌ Queue file not found.")
+        if not full_upload_id:
+            await update.message.reply_text("❌ Queue file not found.")
+            return ConversationHandler.END
+
+        target_item = next((i for i in pending if i["item_id"].startswith(item_id)), None)
+        if not target_item:
+            await update.message.reply_text("✅ Item already resolved.")
+            return ConversationHandler.END
+
+        course       = target_item["course"]
+        # Blocking Sheets I/O: keep it off the event loop (see HANDOFF.md #16).
+        session_info = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: resolve(course, target_item["session"], target_item.get("session_type"), cfg))
+
+        matches = [r for r in session_info.roster if search_term in r[0].lower()][:5]
+
+        if not matches:
+            await update.message.reply_text("No students found matching that name. Try again or /cancel.")
+            return SEARCH_ROSTER
+
+        keyboard = []
+        for roster_name, roster_row in matches:
+            cb_data = f"res|{short_upload_id}|{item_id}|{roster_row}"
+            keyboard.append([InlineKeyboardButton(escape_markdown(roster_name), callback_data=cb_data)])
+
+        await update.message.reply_text("Found these students:", reply_markup=InlineKeyboardMarkup(keyboard))
         return ConversationHandler.END
-
-    target_item = next((i for i in pending if i["item_id"].startswith(item_id)), None)
-    if not target_item:
-        await update.message.reply_text("✅ Item already resolved.")
+    except Exception as exc:
+        await update.message.reply_text(_user_error_message(exc, "roster search"))
         return ConversationHandler.END
-
-    course       = target_item["course"]
-    # Blocking Sheets I/O: keep it off the event loop (see HANDOFF.md #16).
-    session_info = await asyncio.get_running_loop().run_in_executor(
-        None, lambda: resolve(course, target_item["session"], target_item.get("session_type"), cfg))
-
-    matches = [r for r in session_info.roster if search_term in r[0].lower()][:5]
-
-    if not matches:
-        await update.message.reply_text("No students found matching that name. Try again or /cancel.")
-        return SEARCH_ROSTER
-
-    keyboard = []
-    for roster_name, roster_row in matches:
-        cb_data = f"res|{short_upload_id}|{item_id}|{roster_row}"
-        keyboard.append([InlineKeyboardButton(escape_markdown(roster_name), callback_data=cb_data)])
-
-    await update.message.reply_text("Found these students:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ConversationHandler.END
