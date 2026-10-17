@@ -142,11 +142,8 @@ def _render_sidebar() -> str:
 # ---------------------------------------------------------------------------
 
 def _page_upload() -> None:
-    st.header("📤 Upload Photos")
-    st.info(
-        "Photo upload & processing (W2) — "
-        "calls `attendance.pipeline.run()` / `run_multi()`."
-    )
+    from webapp.pages.upload import _page_upload as render_upload
+    render_upload()
 
 
 def _page_names() -> None:
