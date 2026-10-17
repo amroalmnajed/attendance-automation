@@ -1,0 +1,16 @@
+# webapp/ shares the root requirements.txt — all deps (streamlit, pandas, etc.)
+# are already declared there.  Install from the repo root:
+#
+#     pip install -r requirements.txt
+#
+# Then launch the app:
+#
+#     streamlit run webapp/app.py
+#
+# If you need to install ONLY webapp deps (e.g. on Streamlit Community Cloud),
+# copy this file and add the lines below uncommented:
+#
+# streamlit>=1.37
+# pandas>=2.2
+# PyYAML>=6.0
+# python-dotenv>=1.0.0

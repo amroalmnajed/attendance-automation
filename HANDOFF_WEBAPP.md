@@ -1,0 +1,85 @@
+# HANDOFF_WEBAPP (read this + PROJECT_CONTEXT.md + HANDOFF.md only; skip docs/archive/; grep big files, don't read them whole)
+
+Goal: build `webapp/`, a Streamlit app that replaces the Telegram bot as the primary interface
+(upload photos, resolve reviews, run reports) by calling the SAME pipeline code the bot and CLI
+call — not by re-deriving logic from raw Sheets reads the way `dashboard/` does. Once `webapp/`
+reaches parity (checklist at the bottom), delete `dashboard/`.
+
+The previous chat had NO network: nothing below the "Verified facts" section was test-run against
+a real venv. Only source reading was done. Run `pip install -r requirements.txt && pytest -q`
+yourself and write the baseline count under "Log" before changing anything.
+
+## Rules
+1. First: `pip install -r requirements.txt && pytest -q`. Write the baseline pass count under "Log". Never leave tests red.
+2. One task = one commit (`feat: W<n> ...`). Tick the table + add a 1-line Log entry (what/gotchas) before moving on.
+3. Build in a NEW top-level `webapp/` folder. Do not modify `dashboard/` except in W11 (final removal) — it must keep working until `webapp/` has parity, so a teacher is never left without a working tool mid-migration.
+4. Call `attendance/pipeline.py`, `attendance/review_queue.py`, `attendance/matcher.py`, `attendance/writer.py`, `attendance/session_resolver.py`, `attendance/history.py`, `attendance/absent.py`, `attendance/aliases.py`, `attendance/zoom_api.py`, `attendance/zoom_csv.py`, `attendance/bot/cards.py`, `attendance/bot/crop.py`, `core/auth.py`, `core/logger.py` directly. Do not reimplement OCR, matching, or Sheets I/O in `webapp/`.
+5. PII/secrets: no student names in logs, alerts, summaries, or committed fixtures/screenshots. Never open/print `.env`, `*.json` key files, `review_queue/`, `logs/`.
+6. Line endings: repo blobs are LF, Windows copy may be CRLF. Preserve per file; never mass-convert.
+7. `config/attendance.yaml` has `dry_run_default: false` (the bot is LIVE). The web app must default new uploads to dry-run in its UI regardless of that global default, with an explicit, hard-to-misclick toggle to go live — a slipped click in a browser form is easier than in a Telegram chat.
+8. Stop at ~15% budget left: tests green, table + Log updated, note any half-done work precisely.
+
+## Verified facts (read before planning — corrects stale info in older docs)
+
+- **The real pipeline is UI-agnostic already.** `attendance/pipeline.py` exposes `run()` (one photo), `run_multi()` (several photos, one upload), `run_text()` (pasted names), `run_zoom()` (Zoom CSV/API). The bot and the CLI both call these same functions. `webapp/` must do the same — this is the entire point of the migration.
+- **`dashboard/` never calls the pipeline.** Confirmed by `grep -rn "pipeline\|ocr\|Gemini\|zoom_api\|zoom_csv" dashboard/*.py` returning nothing. It only reads/writes Google Sheets directly (`dashboard/sheets.py`) for an attendance viewer (`dashboard/attendance.py`) and a review-resolve screen (`dashboard/review.py`) that reads a **separate, cosmetic** `ReviewQueue` sheet tab, not the bot's real queue.
+- **There are two review queues today, and they can disagree.** `attendance/review_queue.py` (SQLite, WAL mode) is authoritative — it's what the CLI (`attendance/cli.py::cmd_review_resolve`) and the bot's resolution callback use. `attendance/sheet_review_queue.py` is a second, non-blocking mirror that `pipeline._process_rows()` also writes to "for dashboard visibility" (see calls at every `review_queue.enqueue(...)` site in `pipeline.py`) — its writes swallow errors silently (`except Exception: return None`), so it can silently drift from the real queue. `webapp/` must read/resolve against the REAL SQLite queue (`attendance/review_queue.py`), not the sheet mirror.
+- **Resolving an item has two steps, not one.** `ReviewQueue.resolve(upload_id, item_id, *, chosen_roster_row, chosen_roster_name, attendance_value, resolved_by)` only flips status in the SQLite store and returns the resolved item — it does **not** write to Google Sheets. The actual sheet write + alias learning + variant recording is `resolve_item(item, roster_row, roster_name, attendance_value, session_info, cfg, upload_id, dry_run, resolved_by)` in the same file (used by both `cli.py::cmd_review_resolve` and the bot's callback). Call `resolve_item()` (which internally writes via `writer.batch_write` then the caller marks resolved — check the exact call order in `cli.py::cmd_review_resolve` before porting, since `resolve_item` itself does NOT call `ReviewQueue.resolve`; the caller does both in sequence). Get this wrong and the web app will "resolve" items without ever writing the sheet.
+- **Roles are simpler than `HANDOFF.md`/`PROJECT_CONTEXT.md` describe.** Those docs describe three levels (`teacher`/`admin`/`strict_admin`); the current `attendance/roles.py` has been simplified to a single `authorized` level keyed by Telegram user ID, open to everyone if no allow-list is configured. This **does not map to a web app** (there's no Telegram identity in a browser session) — W9 (Auth) must design actual web auth (shared password is fine for a single-teacher deployment, matching `dashboard/config.py::get_password()`'s existing precedent) and a `resolved_by` string for audit trails on writes, not attempt to reuse Telegram ID checks.
+- **`attendance/bot/cards.py::format_review_card(item, *, upload_id, position)`** is already pure (no Telegram objects — returns `(caption: str, rows: list[list[(button_text, callback_data)]])`) and **`attendance/bot/crop.py`** is pure OpenCV (takes bytes/path, returns a cropped image file). Both are directly portable to Streamlit with light adaptation (render caption as markdown, turn `callback_data` buttons into `st.button`s, display the crop with `st.image`) — do not re-derive the traffic-light/reason-text mapping or the crop math from scratch.
+- **Course/env config pattern already exists** in `dashboard/config.py` (`CourseConfig` dataclass, `_secret()` helper checking `st.secrets` then env, `COURSES` registry) — port this pattern into `webapp/config.py` rather than inventing a new one, but verify it still matches `config/attendance.yaml`'s current course keys (crash/main/g9/g10) since config may drift from what's hardcoded in the dashboard.
+- **Dashboard parts worth porting vs. rewriting**: `dashboard/attendance.py` (session viewer, search, summary metrics) is the closest thing to reusable UI logic, but it currently derives counts straight from sheet cell values — decide per-task (W6) whether to port it as-is or rewrite against `attendance/history.py` for consistency with what `/report` shows the bot's users. `dashboard/sheets.py`'s caching pattern (`st.cache_data(ttl=60)`, `st.cache_resource` for the gspread client) is reusable infrastructure, not business logic — port the pattern, not the Sheets-direct business logic built on top of it.
+
+## Tasks (in this order; ⬜ = todo)
+| T | Task | Status |
+|---|---|---|
+| W1 | Scaffold `webapp/` + config + auth gate | ✅ |
+| W2 | Photo upload & process screen (`pipeline.run`/`run_multi`) | ⬜ |
+| W3 | Paste-names screen (`pipeline.run_text`) | ⬜ |
+| W4 | Zoom ingestion screen (`pipeline.run_zoom`) | ⬜ |
+| W5 | Review queue screen (real SQLite queue + `resolve_item`) | ⬜ |
+| W6 | Attendance viewer & reporting | ⬜ |
+| W7 | Admin tools: revert, absent-offer, aliases, health | ⬜ |
+| W8 | Progress feedback wiring (pipeline `progress` callback) | ⬜ |
+| W9 | Auth & audit trail design | ⬜ |
+| W10 | Deployment docs + secrets template | ⬜ |
+| W11 | Parity verification + delete `dashboard/` | ⬜ |
+
+## Specs
+
+**W1** Create `webapp/` with `app.py` (Streamlit entrypoint, page routing, sidebar), `config.py` (port `dashboard/config.py`'s `CourseConfig`/`_secret()`/`COURSES` pattern; verify course keys against current `config/attendance.yaml`), `.streamlit/config.toml` (copy from repo root's or `dashboard/`'s, whichever is current), `.env.example`, `requirements.txt` (streamlit + whatever `attendance/`'s own `requirements.txt` needs — do not duplicate version pins, reference the root `requirements.txt` where possible). Auth gate: shared password via `st.secrets`/env (same pattern as `dashboard/app.py`'s gate), stored in session state. No Telegram-ID logic. Done = app runs locally (`streamlit run webapp/app.py`), shows password gate, shows an empty sidebar with course selector after login.
+
+**W2** Build the core screen: course + session number + optional session type selector, photo uploader (`st.file_uploader`, `accept_multiple_files=True` for `run_multi`), dry-run toggle (default ON per Rule 7), "Process" button. On submit, save uploaded files to a temp path, call `attendance.pipeline.run()` (single file) or `run_multi()` (multiple), passing a `progress` callback (see W8) and `config_path="config/attendance.yaml"` (resolve the real repo-root path, not relative to `webapp/`). Display the returned `RunSummary`: matched/flagged/written counts, `summary.errors`, `summary.sheet_url` as a link, and — if `summary.flagged > 0` — a link/button to the review queue filtered to that `upload_id`. Test the summary-rendering logic (pure function taking a `RunSummary`-shaped object, not requiring Streamlit) in `tests/test_webapp_upload.py`, following `tests/botutil.py`'s monkeypatch style for mocking `pipeline.run`.
+
+**W3** Equivalent screen for `pipeline.run_text()`: course/session selector + a textarea for pasted `name | mark` lines (reuse `attendance/marks.py::parse_lines`/`split_names_and_marks` for the preview, matching the bot's `/done` preview-then-confirm flow in `attendance/bot/names.py`). Show the same preview-before-submit UX the bot has (unrecognised marks should prompt a fix, not silently default) before calling `run_text()`.
+
+**W4** Two Zoom paths as one screen: (a) meeting ID + date -> `pipeline.run_zoom(source={"meeting_id":..., "date":...}, ...)` (equivalent to `/zoom_fetch`), handling `summary.teacher_not_found` by prompting for a manual start time, matching `attendance/pipeline.py::run_zoom`'s `manual_start_time` param and `_parse_manual_time`'s accepted formats; (b) CSV file upload -> save to disk, `pipeline.run_zoom(source=<path>, ...)` (equivalent to `/zoom_upload`). Surface `summary.session_type_ambiguous` the same way the bot does (prompt for explicit session type). Gate this screen behind `cfg["attendance"]["zoom_csv"]["enabled"]` same as the pipeline does.
+
+**W5** Review queue screen reading `attendance.review_queue.ReviewQueue(store_dir="review_queue").list_pending()` (optionally filtered by `upload_id` from W2/W4's "view flagged items" link). For each item, render via `attendance.bot.cards.format_review_card(item, upload_id=item["upload_id"])` adapted to Streamlit widgets (buttons per candidate, an "Absent" button, a "Search roster" fallback for when none of top3 match — port the bot's `/search` flow logic from `attendance/bot/review.py`, not a from-scratch search box). Show the crop via `attendance.bot.crop` against the stored `image_ref` when available, else the note that no image is available. On resolve: get a fresh `session_info` via `attendance.session_resolver.resolve(...)`, call `attendance.review_queue.resolve_item(item, roster_row, roster_name, attendance_value, session_info, cfg, upload_id, dry_run, resolved_by=<webapp user string>)`, then `ReviewQueue.resolve(upload_id, item_id, chosen_roster_row=..., chosen_roster_name=..., attendance_value=..., resolved_by=...)` to mark it done — confirm the exact call order against `attendance/cli.py::cmd_review_resolve` (grep it) since getting the order wrong either double-writes or marks-without-writing. Test against `tests/test_review_resolve.py`'s existing fixtures/style.
+
+**W6** Session/attendance viewer: session selector, search by student name, summary metrics (present/absent/late/needs-review counts), equivalent to `dashboard/attendance.py` but sourcing counts via `attendance/history.py` where it already computes these (`history_mod.count_marks`) instead of re-deriving from raw cell strings, for consistency with what `/report` shows bot users. Add a reports section equivalent to `/report` (`attendance/cli.py::cmd_report_session`) and `/streaks` (`cmd_report_streaks`) — call the same underlying functions those CLI commands call rather than reimplementing.
+
+**W7** Stub screens (clearly labeled "not yet ported" where incomplete, never silently missing) for: revert (`/revert` -> `attendance/cli.py::cmd_revert`'s logic), the absent-marking offer (`attendance/absent.py::record_pending` already runs during W2/W4 uploads — surface `summary.absent_offer`/`summary.missing_count` and the actual "mark missing absent" action from `attendance/absent.py`), alias management (`attendance/alias_admin.py`, mirroring `/aliases`), and health status (`attendance/health.py::status_text`, mirroring `/health`). These can land as a single combined "Admin" page across sub-tasks if that's more efficient — note in the Log which sub-parts are done vs. stubbed.
+
+**W8** Add a `progress` callback when calling `pipeline.run`/`run_multi` (stages `reading`/`matching`/`saving`, same constants as `pipeline.STAGE_READING` etc.) that updates a Streamlit placeholder/progress bar instead of leaving a blank spinner during the (potentially 10-30s) OCR call. Keep it simple — a `st.status()` block updated per stage is enough; don't need the bot's thread-safety tricks (`run_coroutine_threadsafe`) since Streamlit's execution model is synchronous per request.
+
+**W9** Finalize the auth design from "Verified facts": shared password (matches current `dashboard/` deployment model — fine for a single-teacher/small-team deployment) plus a simple text field for "your name" stored in session state, used as the `resolved_by` string on every write action (review resolutions, reverts, absent-marking) so there's SOME audit trail even without full accounts. Document this decision and its limitation (no real access control, no login-proof identity) explicitly in `webapp/README.md` rather than leaving it implicit.
+
+**W10** `webapp/README.md` (setup/run, modeled on `dashboard/README.md`'s structure) and `webapp/DEPLOY.md` (Streamlit Community Cloud steps, modeled on `dashboard/DEPLOY.md`), `webapp/.streamlit/config.toml`, secrets template listing every env var the app needs (course sheet IDs, `GOOGLE_CREDENTIALS_B64`, webapp password, Gemini/Zoom keys needed by the pipeline itself) modeled on `dashboard/SECRETS_TEMPLATE.toml`.
+
+**W11** Run the full parity checklist below against a real deployment or thorough local test. Only once every box is checked: delete `dashboard/` entirely, remove the `SheetReviewQueue` mirror calls from every `review_queue.enqueue(...)` site in `attendance/pipeline.py::_process_rows` (grep `sheet_review_queue` across `attendance/`) since nothing will read that mirror anymore, and delete `attendance/sheet_review_queue.py` itself. Update `README.md`'s top-level description if it still frames this as "Telegram bot only." Final commit should be exactly this removal, isolated from other changes, so it's easy to revert alone if something was missed.
+
+## Parity checklist (verify before W11 deletes anything)
+- [ ] Upload a photo (or several) through `webapp/` and get matched/flagged/written counts equivalent to the bot for the same input.
+- [ ] Paste names through `webapp/` and get an equivalent result to the bot's text flow.
+- [ ] Process a Zoom CSV/meeting fetch through `webapp/` and get an equivalent result to `/zoom_fetch`/`/zoom_upload`.
+- [ ] Resolve a review item in `webapp/`; confirm via `python -m attendance.cli review list` that the CLI/bot see it as resolved (same SQLite state) AND the sheet cell was actually written.
+- [ ] Attendance viewer and `/report`/`/streaks` equivalents show matching numbers for a known session.
+- [ ] No student names/PII in any new `webapp/` logs, alerts, or test fixtures (grep test fixtures before committing).
+- [ ] Full `pytest -q` still green at or above the W1 baseline count; `ruff check .` clean.
+- [ ] `webapp/README.md` + `webapp/DEPLOY.md` complete; `dashboard/` removed or (if not fully at parity) left in place with a clear note of what's still missing.
+
+## Log
+<!-- One line per completed task: W<n> done: <what changed, gotchas>. -->
+- **Baseline:** 591/593 tests passing (2 pre-existing failures: test_alias_management.py::test_command_is_admins_only_when_no_admin_is_configured, test_zoom_bot.py::test_zoom_unauthorized_user_refusal)
+- **W1 done:** `webapp/__init__.py`, `config.py` (CourseConfig + _secret + COURSES; reads attendance.yaml, falls back to crash/main/g9/g10), `app.py` (auth gate with name field for audit trail, course selector sidebar, page stubs for W2-W7), `.streamlit/config.toml`, `.streamlit/secrets.toml.example`, `.env.example`, `requirements.txt`. Tests: `tests/test_webapp_config.py` (12 tests covering _secret, CourseConfig, COURSES, CONFIG_PATH — all pure-Python, no Streamlit server needed). **Gotcha:** `webapp/` is NOT a `dashboard/` replacement yet — all page bodies are stubs; do not remove `dashboard/` until W11.
