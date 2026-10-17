@@ -167,11 +167,8 @@ def _page_viewer() -> None:
 
 
 def _page_admin() -> None:
-    st.header("🛠️ Admin Tools")
-    st.info(
-        "Admin tools (W7) — revert, absent-offer, alias management, health status. "
-        "*(Not yet implemented.)*"
-    )
+    from webapp.pages.admin import _page_admin as render_admin
+    render_admin()
 
 
 _PAGE_RENDERERS: dict[str, object] = {
