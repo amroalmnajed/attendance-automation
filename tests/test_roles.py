@@ -26,6 +26,7 @@ EXPECTED_LEVEL = {
                    "handle_zoom_teacher_time_text", "handle_zoom_type_callback",
                    "handle_zoom_csv_upload", "handle_zoom_session_num_text",
                    "handle_zoom_confirm_text"],
+    "strict_admin": ["cmd_reload_config"],
 }
 ALL = [(lvl, n) for lvl, names in EXPECTED_LEVEL.items() for n in names]
 
@@ -37,6 +38,8 @@ def _decide(uid, level, cfg=CFG):
 @pytest.mark.parametrize("uid,level,allowed", [
     (AUTHORIZED, "authorized", True), (STRANGER, "authorized", False),
     (None, "authorized", False),
+    (AUTHORIZED, "strict_admin", True), (STRANGER, "strict_admin", False),
+    (None, "strict_admin", False),
 ])
 def test_role_by_level_table(uid, level, allowed):
     assert _decide(uid, level) is allowed

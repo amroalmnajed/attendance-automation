@@ -17,7 +17,7 @@ def test_commands_follow_telegram_rules():
     assert len(names) == len(set(names))
     for c, d, lvl in menu.COMMANDS:
         assert re.fullmatch(r"[a-z0-9_]{1,32}", c) and 1 <= len(d) <= 256
-        assert lvl in ("authorized",)
+        assert lvl in ("authorized", "strict_admin")
 
 
 def test_teacher_and_admin_menus():
@@ -26,7 +26,7 @@ def test_teacher_and_admin_menus():
 
 
 def test_help_lists_only_what_the_caller_may_use():
-    all_cmds = TEACHER_CMDS + ADMIN_EXTRA
+    all_cmds = TEACHER_CMDS + ADMIN_EXTRA + ["reload_config"]
     a = [c for c, _ in menu.allowed_commands(1, CFG)]
     assert a == all_cmds
     assert menu.allowed_commands(999, CFG) == []

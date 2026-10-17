@@ -70,6 +70,7 @@ from attendance.bot.admin import (
     cmd_report,
     cmd_revert,
     cmd_streaks,
+    cmd_reload_config,
     handle_absent_callback,
     handle_revert_callback,
 )
@@ -204,6 +205,7 @@ def main() -> None:
     app.add_handler(CommandHandler("aliases", cmd_aliases))
     app.add_handler(CommandHandler("health",  cmd_health))
     app.add_handler(CommandHandler("help",    cmd_help))
+    app.add_handler(CommandHandler("reload_config", cmd_reload_config))
     app.add_error_handler(_global_error_handler)
 
     try:   # Feature 13: remember where health state lives, schedule the review-age check

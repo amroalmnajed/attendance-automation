@@ -63,10 +63,21 @@ class Decision:
     reason: str      # open | ok | unknown | error
 
 
+AUTHORIZED_IDS: set[int] = set()
+
+
+def update_roles(cfg: Optional[dict] = None, env: Optional[dict] = None) -> set[int]:
+    global AUTHORIZED_IDS
+    AUTHORIZED_IDS = authorized_ids(cfg, env)
+    return AUTHORIZED_IDS
+
+
 def decide(uid: Optional[int], level: str, cfg: Optional[dict], env: Optional[dict] = None) -> Decision:
     authorized = authorized_ids(cfg, env)
     configured = bool(authorized)
     if not configured:
+        if level == "strict_admin":
+            return Decision(False, "closed")
         return Decision(True, "open")          # nothing configured: today's behaviour
     role = AUTHORIZED if uid in authorized else None
     if role is None:
@@ -88,6 +99,8 @@ def startup_warnings(cfg: Optional[dict], env: Optional[dict] = None) -> list[st
 def refusal_text(d: Decision, level: str, uid: Optional[int]) -> str:
     if d.reason == "error":
         return "❌ Couldn't verify your access right now. Please try again in a moment."
+    if d.reason == "closed":
+        return "🔒 This command is unavailable: no authorized user is configured yet."
     who = f"Your Telegram ID is {uid}" if uid is not None else "Your Telegram ID could not be read"
     return (f"🔒 Sorry, you're not authorised to use this bot yet.\n"
             f"{who}. Please send it to an admin so they can add you.")
@@ -97,6 +110,8 @@ def alert_text(d: Decision, level: str, uid: Optional[int]) -> str:
     """Short text for a callback-query alert (Telegram limit: 200 chars)."""
     if d.reason == "error":
         return "❌ Couldn't verify your access. Try again."
+    if d.reason == "closed":
+        return "🔒 Command unavailable (no authorized user configured)."
     return f"🔒 Not authorised. Your Telegram ID: {uid}" if uid is not None else "🔒 Not authorised."
 
 

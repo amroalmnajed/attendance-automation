@@ -71,3 +71,14 @@ def _reset_session_resolver_cache():
         yield
     finally:
         session_resolver.invalidate(client=True)
+
+
+@pytest.fixture(autouse=True)
+def _restore_courses():
+    """common.COURSES is module-level state; restore original list after each test."""
+    from attendance.bot import common
+    saved = list(common.COURSES)
+    try:
+        yield
+    finally:
+        common.COURSES[:] = saved

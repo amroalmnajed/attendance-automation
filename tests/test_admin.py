@@ -226,3 +226,97 @@ def test_search_handler_queue_error_shows_user_safe_message(monkeypatch):
     assert "boom" not in msg
     assert "Exception" not in msg
     assert "❌" in msg or "⚠️" in msg
+
+# ─── T4: /reload_config tests ────────────────────────────────────────────────
+
+def test_reload_config_valid_updates_courses_and_replies_success(monkeypatch):
+    import attendance.bot.admin as admin_mod
+    from attendance.bot import common
+
+    valid_cfg = {
+        "attendance": {
+            "authorized": {"telegram_ids": [1]},
+            "courses": {
+                "course_a": {"layout": "single"},
+                "course_b": {"layout": "single"},
+                "course_c": {"layout": "single"},
+            },
+        }
+    }
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: valid_cfg)
+
+    # Set initial COURSES
+    monkeypatch.setattr(common, "COURSES", ["old1", "old2"])
+
+    upd, replies = _make_update("/reload_config")
+    asyncio.run(admin_mod.cmd_reload_config(upd, _ctx()))
+
+    assert len(replies) == 1
+    assert "✅ Config reloaded — 3 courses loaded." in replies[0]
+    assert common.COURSES == ["course_a", "course_b", "course_c"]
+
+
+def test_reload_config_invalid_rejects_and_does_not_update_courses(monkeypatch):
+    import attendance.bot.admin as admin_mod
+    from attendance.bot import common
+
+    invalid_cfg = {
+        "attendance": {
+            "authorized": {"telegram_ids": [1]},
+            "courses": {
+                "g9": {"layout": "typed_pair", "types": {}},
+            },
+        }
+    }
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: invalid_cfg)
+
+    initial_courses = ["crash", "main", "g10", "g9"]
+    monkeypatch.setattr(common, "COURSES", list(initial_courses))
+
+    upd, replies = _make_update("/reload_config")
+    asyncio.run(admin_mod.cmd_reload_config(upd, _ctx()))
+
+    assert len(replies) == 1
+    msg = replies[0]
+    assert "layout is typed_pair but 'types' is missing or empty" in msg
+    assert common.COURSES == initial_courses
+
+
+def test_reload_config_unexpected_error_shows_user_safe_message(monkeypatch):
+    import attendance.bot.admin as admin_mod
+
+    # We want guard to pass with valid cfg, but handler's _load_cfg to fail
+    valid_cfg = {"attendance": {"authorized": {"telegram_ids": [1]}}}
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: valid_cfg)
+
+    def _boom(*a, **kw):
+        raise RuntimeError("disk broken")
+
+    monkeypatch.setattr("attendance.config_check.validate_cfg", _boom)
+
+    upd, replies = _make_update("/reload_config")
+    asyncio.run(admin_mod.cmd_reload_config(upd, _ctx()))
+
+    assert len(replies) == 1
+    msg = replies[0]
+    assert "disk broken" not in msg
+    assert "RuntimeError" not in msg
+    assert "❌" in msg or "⚠️" in msg
+
+
+def test_reload_config_updates_roles(monkeypatch):
+    import attendance.bot.admin as admin_mod
+    from attendance import roles
+
+    cfg_with_ids = {
+        "attendance": {
+            "authorized": {"telegram_ids": [1, 10, 20]},
+            "courses": {"c1": {"layout": "single"}},
+        }
+    }
+    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: cfg_with_ids)
+
+    upd, replies = _make_update("/reload_config")
+    asyncio.run(admin_mod.cmd_reload_config(upd, _ctx()))
+
+    assert roles.AUTHORIZED_IDS == {1, 10, 20}

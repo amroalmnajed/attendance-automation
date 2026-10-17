@@ -320,3 +320,35 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         log.error("health_cmd_failed", extra={"error": type(exc).__name__})
         text = "❌ Couldn't read the system status right now. Please try again."
     await update.message.reply_text(text[:3900])
+
+@_guard("strict_admin")
+async def cmd_reload_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reload config/attendance.yaml from disk and validate it."""
+    from attendance import roles
+    from attendance.bot import common
+    from attendance.config_check import ConfigError, validate_cfg
+
+    try:
+        cfg = _load_cfg()
+        validate_cfg(cfg)
+    except ConfigError as err:
+        log.warning("reload_config_invalid", extra={"error": str(err)})
+        await update.message.reply_text(str(err))
+        return
+    except Exception as exc:
+        log.error("reload_config_failed", extra={"error": str(exc)})
+        await update.message.reply_text(_user_error_message(exc, "config reload"))
+        return
+
+    courses_cfg = cfg.get("attendance", {}).get("courses", {})
+    if isinstance(common.COURSES, list):
+        common.COURSES[:] = list(courses_cfg.keys())
+    elif isinstance(common.COURSES, dict):
+        common.COURSES.clear()
+        common.COURSES.update(courses_cfg)
+
+    roles.update_roles(cfg)
+
+    n = len(courses_cfg)
+    await update.message.reply_text(f"✅ Config reloaded — {n} courses loaded.")
+

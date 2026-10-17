@@ -28,6 +28,7 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("zoom_fetch", "Fetch Zoom attendance via API", "authorized"),
     ("zoom_upload", "Upload Zoom CSV file", "authorized"),
     ("zoom_reprocess", "Reprocess archived Zoom CSV", "authorized"),
+    ("reload_config", "Reload bot configuration", "strict_admin"),
 ]
 
 
