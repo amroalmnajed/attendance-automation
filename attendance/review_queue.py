@@ -143,7 +143,7 @@ class _Store:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Create table and enable WAL mode if not exists."""
+        """Create tables and enable WAL mode if not exists."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -154,6 +154,103 @@ class _Store:
                     created_at TEXT NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS pending_writes (
+                    write_id TEXT PRIMARY KEY,
+                    upload_id TEXT NOT NULL,
+                    course TEXT NOT NULL,
+                    sheet_id TEXT NOT NULL,
+                    tab TEXT NOT NULL,
+                    cells_json TEXT NOT NULL,
+                    retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 10,
+                    last_error TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+
+    def enqueue_failed_write(
+        self,
+        *,
+        upload_id: str,
+        course: str,
+        sheet_id: str,
+        tab: str,
+        cells: list[dict],
+        last_error: Optional[str] = None,
+        max_retries: int = 10,
+    ) -> str:
+        write_id = str(uuid.uuid4())[:12]
+        now = _now_iso()
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_writes (
+                    write_id, upload_id, course, sheet_id, tab, cells_json,
+                    retry_count, max_retries, last_error, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'pending', ?, ?)
+                """,
+                (
+                    write_id,
+                    upload_id,
+                    course,
+                    sheet_id,
+                    tab,
+                    json.dumps(cells, ensure_ascii=False),
+                    max_retries,
+                    last_error or "",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        return write_id
+
+    def list_pending_writes(self) -> list[dict]:
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT write_id, upload_id, course, sheet_id, tab, cells_json,
+                       retry_count, max_retries, last_error, status, created_at, updated_at
+                FROM pending_writes
+                WHERE status = 'pending' AND retry_count < max_retries
+                ORDER BY created_at ASC
+                """
+            )
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                d["cells"] = json.loads(d["cells_json"])
+                rows.append(d)
+            return rows
+
+    def mark_write_success(self, write_id: str) -> None:
+        now = _now_iso()
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                "UPDATE pending_writes SET status = 'succeeded', updated_at = ? WHERE write_id = ?",
+                (now, write_id),
+            )
+            conn.commit()
+
+    def mark_write_failure(self, write_id: str, error: str) -> None:
+        now = _now_iso()
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                """
+                UPDATE pending_writes
+                SET retry_count = retry_count + 1,
+                    last_error = ?,
+                    status = CASE WHEN retry_count + 1 >= max_retries THEN 'abandoned' ELSE 'pending' END,
+                    updated_at = ?
+                WHERE write_id = ?
+                """,
+                (error[:300], now, write_id),
+            )
             conn.commit()
 
     def _load(self, upload_id: str) -> dict:
@@ -244,6 +341,45 @@ class ReviewQueue:
             if item["item_id"] == item_id:
                 return item
         return None
+
+    def enqueue_failed_write(
+        self,
+        *,
+        upload_id: str,
+        course: str,
+        sheet_id: str,
+        tab: str,
+        cells: list[Any],
+        last_error: Optional[str] = None,
+        max_retries: int = 10,
+    ) -> str:
+        cell_dicts = [
+            {"roster_name": getattr(c, "roster_name", ""),
+             "sheet_row": getattr(c, "sheet_row", 0),
+             "col": getattr(c, "col", ""),
+             "old_value": getattr(c, "old_value", None),
+             "new_value": getattr(c, "new_value", "")}
+            if not isinstance(c, dict) else c
+            for c in cells
+        ]
+        return self._store.enqueue_failed_write(
+            upload_id=upload_id,
+            course=course,
+            sheet_id=sheet_id,
+            tab=tab,
+            cells=cell_dicts,
+            last_error=last_error,
+            max_retries=max_retries,
+        )
+
+    def list_pending_writes(self) -> list[dict]:
+        return self._store.list_pending_writes()
+
+    def mark_write_success(self, write_id: str) -> None:
+        self._store.mark_write_success(write_id)
+
+    def mark_write_failure(self, write_id: str, error: str) -> None:
+        self._store.mark_write_failure(write_id, error)
 
     def enqueue(
         self,

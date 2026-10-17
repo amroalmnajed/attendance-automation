@@ -228,6 +228,12 @@ def main() -> None:
     except Exception as exc:
         log.warning("reminders_install_failed", extra={"error": type(exc).__name__})
 
+    try:   # T12: retry pending writes fallback queue
+        from attendance import writer as writer_mod
+        writer_mod.install(app, _load_cfg)
+    except Exception as exc:
+        log.warning("writer_install_failed", extra={"error": type(exc).__name__})
+
     log.info("telegram_bot_started", extra={"status": "polling"})
     print("Telegram bot is running. Send /start to begin.")
     app.run_polling()

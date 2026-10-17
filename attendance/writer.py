@@ -11,7 +11,7 @@ Safety contract:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Callable, Optional
 
 
 from attendance import health
@@ -151,9 +151,10 @@ def batch_write(
     session: SheetSession,
     cells: list[WriteCell],
     *,
-    upload_id: str,
+    upload_id: str = "unknown",
     dry_run: bool = True,
     retry_cfg: Optional[dict] = None,
+    store_dir: str = "review_queue",
 ) -> WriteResult:
     """Write (or diff) a list of cells to the Google Sheet.
 
@@ -163,6 +164,7 @@ def batch_write(
         upload_id:  Unique identifier for this upload (for audit log).
         dry_run:    If True, print the diff but do not write anything.
         retry_cfg:  Optional dict with max_attempts, base_s, cap_s, jitter.
+        store_dir:  Directory for review queue and fallback DB.
 
     Returns:
         WriteResult summarising what was (or would be) written.
@@ -188,13 +190,28 @@ def batch_write(
         base_s=float(retry.get("base_s", 1.0)),
         cap_s=float(retry.get("cap_s", 32.0)),
         jitter=bool(retry.get("jitter", True)),
-        context={"upload_id": upload_id, "course": session.course, "tab": session.tab},
+        context={"upload_id": upload_id, "course": getattr(session, "course", "unknown"), "tab": getattr(session, "tab", "unknown")},
     )
     try:
         ws = _with_backoff(session.get_worksheet, op="sheets_open_worksheet", **backoff_kw)
-    except Exception:
+    except Exception as exc:
         health.record("sheets_write_error")
+        to_write = [c for c in cells if not (c.old_value and c.old_value.strip() == c.new_value)]
+        if to_write:
+            try:
+                enqueue_failed_write(
+                    upload_id=upload_id,
+                    course=getattr(session, "course", "unknown"),
+                    sheet_id=getattr(session, "sheet_id", "unknown"),
+                    tab=getattr(session, "tab", "unknown"),
+                    cells=to_write,
+                    last_error=str(exc)[:300],
+                    store_dir=store_dir,
+                )
+            except Exception as enq_exc:
+                log.error("enqueue_failed_write_error", extra={"error": str(enq_exc)})
         raise
+
     updates: list[dict] = []
 
     for cell in cells:
@@ -214,8 +231,20 @@ def batch_write(
         # Same payload re-sent on retry is idempotent (absolute cell values).
         try:
             _with_backoff(_do_update, op="sheets_batch_update", **backoff_kw)
-        except Exception:
+        except Exception as exc:
             health.record("sheets_write_error")
+            try:
+                enqueue_failed_write(
+                    upload_id=upload_id,
+                    course=getattr(session, "course", "unknown"),
+                    sheet_id=getattr(session, "sheet_id", "unknown"),
+                    tab=getattr(session, "tab", "unknown"),
+                    cells=written,
+                    last_error=str(exc)[:300],
+                    store_dir=store_dir,
+                )
+            except Exception as enq_exc:
+                log.error("enqueue_failed_write_error", extra={"error": str(enq_exc)})
             raise
         invalidate_session_cache()      # the sheet changed: cached rosters/columns are stale
 
@@ -262,3 +291,105 @@ def _print_diff(cells: list[WriteCell], dry_run: bool) -> None:
             f"{old_disp:>14}  {c.new_value:<14}  {marker}"
         )
     print()
+
+
+# ─── T12: Fallback queue & background retry ───────────────────────────────────
+
+def enqueue_failed_write(
+    *,
+    upload_id: str,
+    course: str,
+    sheet_id: str,
+    tab: str,
+    cells: list[WriteCell],
+    last_error: Optional[str] = None,
+    max_retries: int = 10,
+    store_dir: str = "review_queue",
+) -> str:
+    """Store failed write cells into SQLite review queue DB for background retries."""
+    from attendance.review_queue import ReviewQueue
+    rq = ReviewQueue(store_dir=store_dir)
+    return rq.enqueue_failed_write(
+        upload_id=upload_id,
+        course=course,
+        sheet_id=sheet_id,
+        tab=tab,
+        cells=cells,
+        last_error=last_error,
+        max_retries=max_retries,
+    )
+
+
+def retry_pending_writes(store_dir: str = "review_queue", cfg: Optional[dict] = None) -> int:
+    """Process pending failed writes from SQLite. Returns count of recovered batches."""
+    from attendance.review_queue import ReviewQueue
+    rq = ReviewQueue(store_dir=store_dir)
+    pending = rq.list_pending_writes()
+    if not pending:
+        return 0
+
+    retry_kw = {}
+    if isinstance(cfg, dict):
+        retry_kw = cfg.get("attendance", {}).get("write", {}).get("retry", {}) or {}
+
+    gc = _get_client(retry_kw)
+    succeeded = 0
+
+    for item in pending:
+        write_id = item["write_id"]
+        sheet_id = item["sheet_id"]
+        tab = item["tab"]
+        cells = [
+            WriteCell(
+                roster_name=c.get("roster_name", ""),
+                sheet_row=int(c.get("sheet_row", 0)),
+                col=c.get("col", ""),
+                old_value=c.get("old_value"),
+                new_value=c.get("new_value", ""),
+            )
+            for c in item.get("cells", [])
+        ]
+        updates = [{"range": f"{c.col}{c.sheet_row}", "values": [[c.new_value]]} for c in cells]
+
+        try:
+            ws = _open_worksheet(gc, sheet_id, tab, retry_kw)
+            ws.batch_update(updates, value_input_option="USER_ENTERED")
+            rq.mark_write_success(write_id)
+            invalidate_session_cache()
+            succeeded += 1
+            for c in cells:
+                audit_write(
+                    upload_id=item["upload_id"],
+                    course=item["course"],
+                    sheet_id=sheet_id,
+                    tab=tab,
+                    cell=f"{c.col}{c.sheet_row}",
+                    old_value=c.old_value,
+                    new_value=c.new_value,
+                    dry_run=False,
+                )
+            log.info("pending_write_recovered", extra={"write_id": write_id, "upload_id": item["upload_id"]})
+        except Exception as exc:
+            rq.mark_write_failure(write_id, str(exc))
+            log.warning("pending_write_retry_failed", extra={"write_id": write_id, "error": str(exc)[:200]})
+
+    return succeeded
+
+
+def install(app, load_cfg: Callable[[], dict], interval: int = 300) -> bool:
+    """Schedule recurring background retries for pending writes."""
+    jq = getattr(app, "job_queue", None)
+    if jq is None:
+        return False
+
+    async def _job(context) -> None:
+        try:
+            import asyncio
+            cfg = load_cfg()
+            rd = (((cfg or {}).get("attendance") or {}).get("review") or {}).get("local_dir", "review_queue")
+            await asyncio.get_running_loop().run_in_executor(None, retry_pending_writes, rd, cfg)
+        except Exception as exc:
+            log.error("pending_writes_job_failed", extra={"error": type(exc).__name__})
+
+    jq.run_repeating(_job, interval=interval, first=60, name="attendance_pending_writes")
+    return True
