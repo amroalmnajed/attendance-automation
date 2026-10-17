@@ -24,7 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import streamlit as st  # noqa: E402 (must come after sys.path fixup)
 
-from webapp.config import CONFIG_PATH, COURSES, _secret  # noqa: E402
+from webapp.config import COURSES, _secret  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit call)

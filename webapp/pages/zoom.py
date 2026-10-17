@@ -7,15 +7,13 @@ Calls attendance.pipeline.run_zoom() with two paths:
 from __future__ import annotations
 
 import tempfile
-from datetime import datetime
+from datetime import date
 from pathlib import Path
-from typing import Optional
 
 import streamlit as st
 import yaml
 
 from attendance.pipeline import run_zoom
-from core.notifier import RunSummary
 from webapp.config import CONFIG_PATH, COURSES
 from webapp.pages.upload import render_summary
 

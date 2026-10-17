@@ -1,11 +1,30 @@
 # Attendance Automation
 
-Telegram bot that turns a photo of a paper attendance sheet into attendance marks in Google Sheets.
+Telegram bot and web app that turn a photo of a paper attendance sheet into attendance marks in Google Sheets.
 
 Photo -> OpenCV clean-up -> Gemini OCR -> fuzzy match against the roster -> Google Sheets.
-Uncertain matches go to a review queue that an admin resolves from Telegram (or the CLI).
+Uncertain matches go to a review queue that an admin resolves from Telegram, the CLI, or the web app.
+
+## Interfaces
+
+The project has three interfaces:
+1. **Telegram bot** - Upload photos, paste names, resolve reviews via chat
+2. **CLI** - Command-line tools for processing and review
+3. **Web app** - Browser-based interface (see `webapp/README.md`)
+
+**Note:** The web app (`webapp/`) is the primary interface intended to replace the bot. The dashboard (`dashboard/`) is a legacy viewer that reads sheets directly and will be removed once webapp reaches full parity.
 
 ## Run
+
+### Web App (Primary Interface)
+
+See `webapp/README.md` for setup and deployment instructions.
+
+```bash
+streamlit run webapp/app.py
+```
+
+### Telegram Bot
 
 1. Python 3.12 (see `.python-version`), then `pip install -r requirements.txt`.
 2. Copy `.env.example` to `.env` and fill in your actual values (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`,
@@ -16,6 +35,10 @@ Uncertain matches go to a review queue that an admin resolves from Telegram (or 
 4. Start the bot: `python -m attendance.ingest`
 
 `dry_run_default: false` means the bot writes to the real sheets. Set it to `true` to rehearse.
+
+### CLI
+
+Command-line tools for processing and review. See `attendance/cli.py` for available commands.
 
 ## Layout
 

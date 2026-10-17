@@ -8,7 +8,6 @@ import streamlit as st
 
 from attendance.marks import format_preview, has_issues, parse_lines, split_names_and_marks
 from attendance.pipeline import run_text
-from core.notifier import RunSummary
 from webapp.config import CONFIG_PATH, COURSES
 from webapp.pages.upload import render_summary
 
