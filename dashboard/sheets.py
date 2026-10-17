@@ -9,6 +9,7 @@ import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 
 from config import (
     CACHE_TTL_SECONDS,
@@ -269,9 +270,13 @@ def batch_write_attendance(
             if not student_found:
                 errors.append(f"Student '{student_name}' not found in roster")
 
-        # Execute batch update
+        # Execute batch update (convert to gspread format)
         if batch_updates:
-            ws.batch_update(batch_updates)
+            formatted_updates = [
+                {"range": rowcol_to_a1(row, col), "values": [[value]]}
+                for row, col, value in batch_updates
+            ]
+            ws.batch_update(formatted_updates)
             bust_cache()
 
         return len(batch_updates), errors
@@ -330,7 +335,11 @@ def update_review_item(
                     updates.append((row_idx, resolved_at_idx + 1, now))
 
                 if updates:
-                    ws.batch_update(updates)
+                    formatted_updates = [
+                        {"range": rowcol_to_a1(row, col), "values": [[value]]}
+                        for row, col, value in updates
+                    ]
+                    ws.batch_update(formatted_updates)
                     bust_cache()  # Invalidate cache after write
                 return True, ""
 
@@ -403,9 +412,13 @@ def batch_update_review_items(
             if resolved_at_idx >= 0:
                 batch_updates.append((row_idx, resolved_at_idx + 1, now))
 
-        # Execute batch update
+        # Execute batch update (convert to gspread format)
         if batch_updates:
-            ws.batch_update(batch_updates)
+            formatted_updates = [
+                {"range": rowcol_to_a1(row, col), "values": [[value]]}
+                for row, col, value in batch_updates
+            ]
+            ws.batch_update(formatted_updates)
             bust_cache()
 
         return len(updates) - len(errors), errors
