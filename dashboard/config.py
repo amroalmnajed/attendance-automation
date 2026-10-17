@@ -20,6 +20,21 @@ if os.path.exists(parent_env):
     load_dotenv(parent_env, override=False)
 
 
+# ── Secrets resolution (st.secrets in cloud, env locally) ──────────────
+
+def _secret(name: str) -> str:
+    """Look up a secret in st.secrets first, then environment."""
+    try:
+        import streamlit as st  # local import so this module is importable from scripts
+        if name in st.secrets:
+            return st.secrets[name]
+    except Exception:
+        # Not running under Streamlit — fall through to env.
+        pass
+    # Always check env as fallback
+    return os.getenv(name, "")
+
+
 @dataclass(frozen=True)
 class CourseConfig:
     """One course = one spreadsheet + one main tab + one review tab."""
@@ -38,38 +53,38 @@ COURSES: list[CourseConfig] = [
     CourseConfig(
         key="crash",
         display_name="Crash Course",
-        sheet_id=os.getenv("CRASH_SHEET_ID", ""),
-        tab_name=os.getenv("CRASH_TAB", "Attendance"),
-        review_tab=os.getenv("REVIEW_TAB", "ReviewQueue"),
-        session_pattern=os.getenv("CRASH_SESSION_PATTERN", r"^Session\s+\d+$"),
+        sheet_id=_secret("CRASH_SHEET_ID"),
+        tab_name=_secret("CRASH_TAB") or "Attendance",
+        review_tab=_secret("REVIEW_TAB") or "ReviewQueue",
+        session_pattern=_secret("CRASH_SESSION_PATTERN") or r"^Session\s+\d+$",
         attendance_pattern=None,
     ),
     CourseConfig(
         key="main",
         display_name="Main Course",
-        sheet_id=os.getenv("MAIN_SHEET_ID", ""),
-        tab_name=os.getenv("MAIN_TAB", "Attendance"),
-        review_tab=os.getenv("REVIEW_TAB", "ReviewQueue"),
-        session_pattern=os.getenv("MAIN_SESSION_PATTERN", r"^Session\s+\d+$"),
+        sheet_id=_secret("MAIN_SHEET_ID"),
+        tab_name=_secret("MAIN_TAB") or "Attendance",
+        review_tab=_secret("REVIEW_TAB") or "ReviewQueue",
+        session_pattern=_secret("MAIN_SESSION_PATTERN") or r"^Session\s+\d+$",
         attendance_pattern=None,
     ),
     CourseConfig(
         key="g9",
         display_name="Grade 9",
-        sheet_id=os.getenv("G9_SHEET_ID", ""),
-        tab_name=os.getenv("G9_TAB", "Attendance"),
-        review_tab=os.getenv("REVIEW_TAB", "ReviewQueue"),
-        session_pattern=os.getenv("G9_SESSION_PATTERN", r"^S\d+$"),
-        attendance_pattern=os.getenv("G9_ATTENDANCE_PATTERN", r"^S\d+\s+Attendance$"),
+        sheet_id=_secret("G9_SHEET_ID"),
+        tab_name=_secret("G9_TAB") or "Attendance",
+        review_tab=_secret("REVIEW_TAB") or "ReviewQueue",
+        session_pattern=_secret("G9_SESSION_PATTERN") or r"^S\d+$",
+        attendance_pattern=_secret("G9_ATTENDANCE_PATTERN") or r"^S\d+\s+Attendance$",
     ),
     CourseConfig(
         key="g10",
         display_name="Grade 10",
-        sheet_id=os.getenv("G10_SHEET_ID", ""),
-        tab_name=os.getenv("G10_TAB", "Attendance"),
-        review_tab=os.getenv("REVIEW_TAB", "ReviewQueue"),
-        session_pattern=os.getenv("G10_SESSION_PATTERN", r"^S\d+$"),
-        attendance_pattern=os.getenv("G10_ATTENDANCE_PATTERN", r"^S\d+\s+Attendance$"),
+        sheet_id=_secret("G10_SHEET_ID"),
+        tab_name=_secret("G10_TAB") or "Attendance",
+        review_tab=_secret("REVIEW_TAB") or "ReviewQueue",
+        session_pattern=_secret("G10_SESSION_PATTERN") or r"^S\d+$",
+        attendance_pattern=_secret("G10_ATTENDANCE_PATTERN") or r"^S\d+\s+Attendance$",
     ),
 ]
 
@@ -94,21 +109,6 @@ CACHE_TTL_SECONDS = 60
 
 # How many candidate names the review UI offers per item.
 CANDIDATE_COUNT = 3
-
-
-# ── Secrets resolution (st.secrets in cloud, env locally) ──────────────
-
-def _secret(name: str) -> str:
-    """Look up a secret in st.secrets first, then environment."""
-    try:
-        import streamlit as st  # local import so this module is importable from scripts
-        if name in st.secrets:
-            return st.secrets[name]
-    except Exception:
-        # Not running under Streamlit — fall through to env.
-        pass
-    # Always check env as fallback
-    return os.getenv(name, "")
 
 
 def get_credentials_b64() -> str:
