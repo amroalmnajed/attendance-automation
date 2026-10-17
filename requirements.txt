@@ -26,6 +26,9 @@ python-dotenv>=1.0.0
 pytest>=7.0.0
 pytest-cov>=4.0.0
 
+# Security
+pre-commit>=3.6.0
+
 # Optional: for structured logging in production
 # python-json-logger>=2.0.0
 

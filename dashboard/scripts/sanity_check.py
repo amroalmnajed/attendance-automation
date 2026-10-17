@@ -10,6 +10,10 @@ import json
 import os
 import sys
 
+import gspread
+from dotenv import load_dotenv
+from google.oauth2.service_account import Credentials
+
 # Add parent directory to path to import config
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,10 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 parent_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 if os.path.exists(parent_env):
     load_dotenv(parent_env)
-
-import gspread
-from dotenv import load_dotenv
-from google.oauth2.service_account import Credentials
 
 load_dotenv()
 if not os.getenv("GOOGLE_CREDENTIALS_B64"):

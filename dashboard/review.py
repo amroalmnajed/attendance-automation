@@ -106,6 +106,7 @@ def approve_selected(selected: pd.DataFrame, course: CourseConfig) -> None:
 
     # Prepare batch updates
     attendance_updates = []
+    type_updates = []  # For g9/g10 typed-pair courses
     review_updates = []
     errors = []
 
@@ -137,19 +138,22 @@ def approve_selected(selected: pd.DataFrame, course: CourseConfig) -> None:
 
         student_row_idx = student_row_idx[0]
 
-        # Find the session column
-        session_num = row.get("session_num", "")
-        session_col_name = None
-        for col in session_cols.keys():
-            # For crash/main: "Session 1", "Session 2", etc.
-            # For g9/g10: "S1 Attendance", "S2 Attendance", etc.
-            # Use word boundary to avoid "1" matching "Session 10", "Session 11", etc.
-            if re.search(rf'\b{re.escape(str(session_num))}\b', col):
-                session_col_name = col
-                break
+        # Use session_column from the review item if available (exact match)
+        # Fall back to regex reconstruction for backward compatibility
+        session_col_name = row.get("session_column", "")
+        if not session_col_name:
+            # Backward compatible: reconstruct from session_num
+            session_num = row.get("session_num", "")
+            for col in session_cols.keys():
+                # For crash/main: "Session 1", "Session 2", etc.
+                # For g9/g10: "S1 Attendance", "S2 Attendance", etc.
+                # Use word boundary to avoid "1" matching "Session 10", "Session 11", etc.
+                if re.search(rf'\b{re.escape(str(session_num))}\b', col):
+                    session_col_name = col
+                    break
 
         if not session_col_name:
-            errors.append(f"Session column for session {session_num} not found")
+            errors.append(f"Session column for session {row.get('session_num', '?')} not found")
             continue
 
         # Check if already has a value (idempotency)
@@ -160,15 +164,31 @@ def approve_selected(selected: pd.DataFrame, course: CourseConfig) -> None:
 
         # Add to batch updates
         attendance_updates.append((resolved_name, session_col_name, resolved_value))
+
+        # For typed-pair courses (g9/g10), also write the session type
+        session_type = row.get("session_type", "")
+        if session_type and course.attendance_pattern:
+            # Find the type column (left of attendance column for typed-pair)
+            type_col_name = session_col_name.replace(" Attendance", "")
+            if type_col_name in session_cols:
+                type_updates.append((resolved_name, type_col_name, session_type))
+
         resolved_by = st.session_state.get("user_name", "admin") or "admin"
         review_updates.append((item_id, resolved_name, resolved_value, resolved_by))
 
-    # Execute batch writes
+    # Execute batch writes - attendance first
     att_success_count, att_errors = sheets.batch_write_attendance(course, attendance_updates)
     errors.extend(att_errors)
 
-    review_success_count, review_errors = sheets.batch_update_review_items(course, review_updates)
-    errors.extend(review_errors)
+    # Execute batch writes - type cells for g9/g10
+    if type_updates:
+        type_success_count, type_errors = sheets.batch_write_attendance(course, type_updates)
+        errors.extend(type_errors)
+
+    # Mark review items as approved (only if attendance write succeeded)
+    if att_success_count > 0:
+        review_success_count, review_errors = sheets.batch_update_review_items(course, review_updates)
+        errors.extend(review_errors)
 
     # Show results
     if att_success_count > 0:

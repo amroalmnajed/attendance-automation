@@ -142,7 +142,8 @@ def load_attendance(course: CourseConfig) -> tuple[pd.DataFrame, datetime, dict[
 # ── Review queue tab ───────────────────────────────────────────────────
 
 REVIEW_REQUIRED_COLUMNS = [
-    "id", "upload_id", "course", "session_num", "raw_name",
+    "id", "upload_id", "course", "session_num", "session_column", "session_type",
+    "raw_name", "image_ref", "bounding_box", "paper_row_index", "photo_index",
     "candidate_1", "candidate_1_score",
     "candidate_2", "candidate_2_score",
     "candidate_3", "candidate_3_score",
@@ -357,6 +358,9 @@ def batch_update_review_items(
     """
     Batch update multiple review items to mark them as resolved.
     Returns (success_count, error_messages).
+
+    Safety: This only marks items as approved. The calling code should ensure
+    attendance writes succeed before calling this, to avoid orphaned approvals.
     """
     if not updates:
         return 0, []

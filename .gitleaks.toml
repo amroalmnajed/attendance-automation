@@ -1,0 +1,45 @@
+# Gitleaks configuration for attendance-automation
+# Scan for common secret patterns before commit
+
+title = "gitleaks config"
+
+[extend]
+useDefaultConfig = true
+
+# Allowlist for legitimate files that might trigger false positives
+[[allowlist]]
+description = "Allow template files with placeholders"
+paths = [
+  '''dashboard/SECREDS_TEMPLATE\.toml''',
+  '''dashboard/DEPLOYMENT_CHECKLIST\.md''',
+  '''\.env\.example''',
+  '''\.env\.template''',
+]
+
+[[allowlist]]
+description = "Allow placeholder values"
+regexes = [
+  '''YOUR_.*_HERE''',
+  '''CHANGE_THIS''',
+  '''SET_YOUR''',
+  '''placeholder''',
+]
+
+# Additional rules specific to this project
+[[rules]]
+description = "Google Service Account private key"
+id = "google-service-account-key"
+regex = '''(?i)"private_key":\s*"[^"]{10,}"'''
+keywords = ["private_key", "service_account", "google"]
+
+[[rules]]
+description = "Google API key"
+id = "google-api-key"
+regex = '''AIza[0-9A-Za-z\\-_]{35}'''
+keywords = ["google", "api", "key"]
+
+[[rules]]
+description = "Streamlit secrets"
+id = "streamlit-secret"
+regex = '''(?i)st\.secrets\[['""]\w+['""]\]'''
+keywords = ["st.secrets", "secrets"]

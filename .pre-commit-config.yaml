@@ -1,0 +1,22 @@
+# Pre-commit hooks for attendance-automation
+# Install with: pip install pre-commit
+# Run: pre-commit install
+
+repos:
+  # Gitleaks - Secret scanning
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        args: ['--config', '.gitleaks.toml']
+
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict

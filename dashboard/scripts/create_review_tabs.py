@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 import base64
 import json
+from config import get_course, COURSES
 
 # Load env files
 load_dotenv()
@@ -22,15 +23,13 @@ parent_env = os.path.join(dashboard_dir, "..", ".env")
 if os.path.exists(parent_env):
     load_dotenv(parent_env, override=False)
 
-# Get dashboard directory for credential loading
-dashboard_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
 REVIEW_HEADERS = [
-    "id", "upload_id", "course", "session_num", "raw_name",
+    "id", "upload_id", "course", "session_num", "session_column", "session_type",
+    "raw_name", "image_ref", "bounding_box", "paper_row_index", "photo_index",
     "candidate_1", "candidate_1_score",
     "candidate_2", "candidate_2_score",
     "candidate_3", "candidate_3_score",
@@ -57,25 +56,25 @@ def main():
     creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     client = gspread.authorize(creds)
 
-    for prefix in ("CRASH", "MAIN", "G9", "G10"):
-        sheet_id = os.getenv(f"{prefix}_SHEET_ID", "")
-        if not sheet_id:
-            print(f"\n[{prefix}] skipped (no sheet ID)")
+    # Iterate over configured courses
+    for course in COURSES:
+        if not course.sheet_id:
+            print(f"\n[{course.key}] skipped (no sheet ID)")
             continue
 
         try:
-            spreadsheet = client.open_by_key(sheet_id)
+            spreadsheet = client.open_by_key(course.sheet_id)
         except Exception as exc:
-            print(f"\n[{prefix}] ERROR opening sheet {sheet_id}: {exc}")
+            print(f"\n[{course.key}] ERROR opening sheet {course.sheet_id}: {exc}")
             continue
 
-        print(f"\n=== [{prefix}] {spreadsheet.title} ===")
+        print(f"\n=== [{course.key}] {spreadsheet.title} ===")
 
-        # Check if ReviewQueue tab exists
-        review_tab_name = "ReviewQueue"
+        # Use the course's configured review tab name
+        review_tab_name = course.review_tab
         try:
             review_ws = spreadsheet.worksheet(review_tab_name)
-            print(f"  ReviewQueue tab already exists")
+            print(f"  ReviewQueue tab ('{review_tab_name}') already exists")
             # Verify headers
             existing_headers = review_ws.row_values(1)
             if existing_headers == REVIEW_HEADERS:
@@ -85,8 +84,8 @@ def main():
                 print(f"  Expected: {REVIEW_HEADERS}")
                 print(f"  Found: {existing_headers}")
         except gspread.WorksheetNotFound:
-            print(f"  Creating ReviewQueue tab...")
-            review_ws = spreadsheet.add_worksheet(title=review_tab_name, rows=1000, cols=20)
+            print(f"  Creating ReviewQueue tab ('{review_tab_name}')...")
+            review_ws = spreadsheet.add_worksheet(title=review_tab_name, rows=1000, cols=25)
             review_ws.update([REVIEW_HEADERS], "A1")
             print(f"  ReviewQueue tab created with headers")
             # Freeze header row

@@ -32,7 +32,7 @@ MAIN_SHEET_ID = "your-main-sheet-id"
 G9_SHEET_ID = "your-g9-sheet-id"
 G10_SHEET_ID = "your-g10-sheet-id"
 
-# Tab names (optional, defaults are set in config.py)
+# Tab names (optional, defaults are set in config.py to match bot config)
 CRASH_TAB = "Crash-Attendance"
 MAIN_TAB = "Main-Attendance"
 G9_TAB = "Main-Attendance"
