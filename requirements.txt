@@ -35,3 +35,7 @@ python-telegram-bot[job-queue]>=20.0
 # HTTP client for Zoom API
 httpx>=0.25.0
 
+# Dashboard dependencies
+streamlit>=1.37
+pandas>=2.2
+

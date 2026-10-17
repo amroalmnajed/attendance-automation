@@ -1,0 +1,125 @@
+# Streamlit Cloud Deployment Checklist
+
+## Step 1: Base64-Encoded Service Account Credentials
+
+Copy this base64 string and add it to your Streamlit Cloud secrets as `GOOGLE_CREDENTIALS_B64`:
+
+```
+ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAgInByb2plY3RfaWQiOiAiYXR0ZW5kYW5jZS01MTEwMDUiLAogICJwcml2YXRlX2tleV9pZCI6ICI3ODFlNTJhMzEzMTYzNWE4OGZiNWE4Yjc2ZGE0YjE5ZjdlZTU2NDUyIiwKICAicHJpdmF0ZV9rZXkiOiAiLS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tXG5NSUlFdlFJQkFEQU5CZ2txaGtpRzl3MEJBUUVGQUFTQ0JLY3dnZ1NqQWdFQUFvSUJBUURjTnQ2SktrL1hsTWF5XG5IcVZsRE9hSnArSmRRNHAyenRjTkQwVzNyR0pCeXdJUGxaSWhDOVZyblQrY0M1ckZXNjlra29SNGtTY1JqVHlGXG4yc1RJQ0UxcUlOMlFVaWlTYzI4am1CR1psMTFXdHlQclBhTUtzU010TlNjU0VxbjhiOEFGUUNmdko4YWo5RUVjXG5CK0NWMlNvQXVIK2ZyVlVrV3dwaUJ1MTV4REI4NytES3pkUnRRcWoyK3h0WDltYVdmTURSRnJhMjF6c1lmK0hZXG5mN1JVVWlKVTgveGNsaHd2WXBIT3ExcWFzaEY2ZFcvTmpMTDh5ZG5ScGRUNlRJNWxldmg4Y2I4QkVmeDdpdWRpXG43Q0RFMWtkV0NyUnVONnhoREMyclYwZWlzeHlsL3BNZ3daekFpUlhnSU0wdzBrOHRPbEZVai82R0JMYjM5QzVDXG5DK3J2cnlUWkFnTUJBQUVDZ2dFQUI2VmlFYW9sN29yTVlWZmVEMFdrNVlldVBPWEE4NElZQm15TzA2TkpJQmF2XG40aUdqMnNEaDdxUWRsc255WEVMa01wNUJ1anZ6K3RDSUZ1K3pJR3psWHpkMzZmQm9WemxwMVBjTk9XTi9pcWkrXG5Od2REVjNZeURmcEgrb0VxWk1qdWhtQWxZdERqUFVNWVZhUlNZSEdUVzBZTXJGc2sxeWZRRXZwQm1aWTl4c0N1XG45T2UwdnJEZVl2Vm55UzBXUW5FN2FUNE95STl4OEZGQWRUQnFQUjN0ZU5sVUR6Wkk5c2U5VDRBWjErTktMdmJ3XG5RZk5oWlNzVTNrOXFQbnRBRVFRVXFES1RkalUwUGRVRmdSRExlcVhRcWdRTCsxWUNCZ05HcE9Vd2ZCOVFPTURqXG5QYkg2cmNoMEpwUG9oQjJKWUxhTndTOTdFSUFENnJtajAzY0RPL2NvUVFLQmdRRHUwTitXVk8zQlFKalE0SjZWXG43WGY3UXUwZWlTYWdKQUtUWWR4d0hiVkpqaG5idTZHYndtME1rWlBXanBPOUF3VnRkOG9PNnl3K3Z1SVcvYTdzXG4ycmZUR0JPSU1xN29aN0l6aFV1b3pWZ3VhYTkydXdHY1k3WmJrbHp1cERQRGh2SFQrMVdORlhTZk5QUHRlQkVKXG4xakxnbHFIQkJjZ3lMZTNidFFCTEVSeVpzUUtCZ1FEc0QxZ1hQS2hDelliVHAzUEhmT3NqTjN1TXZ3U0lUbW43XG5OOUc4K3ordk8yMW5ZMjcvVWtYa3VmcllYcEZwaUQ0em42aTU4ZkxnOHg2VS9iM05LY1N6bnRmZUxhaC9rZUJRXG5vT1hndHBvRTZyT09Va3FOdyt6V2hheWZLU2lnUlpIV2laUyt2OUpnS2lERThZRzFJN3hLelRSYmlwUGk3VW0wXG5zcU8wcjFWZnFRS0JnRndzdEUraXdnMTM4RU9XbnI4QlkvRFAyUk9USGh4ckthOVc4eTAyMmpUa3F1aGJtRG0xXG5Kai9XcEhnSW1jODNMazRkRVJrRy9oSE52UmZnbkRhQkNMaHFMNGUvQURGbGJLdGtCRnJIdndSUytFMWNTbmZoXG5LSTVaaEpMN1A1dDFKenVKWTNETDJqSmt6czFXTFVWZHJrOXU5RW03QUpVVmt4dmMxWnNqcEtWUkFvR0FldmRuXG5RUHVFL3YrSEcxd2dVS3QrNVdKeWhwZStxYTZIUUtrTUpiQ1B0UjEwMlNXUDNZcWpCQW5wWktxbWZ0M000U0ZyXG5TQ21FQnJBK253Z3F4ZVBiSm1JNU92QjMxTFJOc0ZLUVRPVnlCOXVtMngxODNxcFFCbE90MzE4V1haNi80SXpjXG5vaHpVWHVtekZrUmo5OUw4czg1L1Zxd3lhMFNHWDQycS8yVlNTTGtDZ1lFQXJMdlRWRlA1NW9GdklJYmdGNDA0XG4wNER5d1pIek1XZWZvR21HZzE0OVBOamVCcmRPQWlwVnZtSVprVkVZS1pWd2VGeHJiemRWZS9QMFVTNWZBQ1ZpXG5jL1Rid0t5ZTBWU0RtUVNNSVVnN1ljOFRYckJZQkxzUmt3YlVPRzBPSWlLVDlsQ2VkV1hvckFCTkFDNUduR29WXG5YYzRReDhnVGZzem91eUVqRi9qd0dsWT1cbi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS1cbiIsCiAgImNsaWVudF9lbWFpbCI6ICJhdHRlbmRhbmNlLXNoZWV0LWJvdEBhdHRlbmRhbmNlLTUxMTAwNS5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsCiAgImNsaWVudF9pZCI6ICIxMDUwMzYwMDk4NTEwNTA4ODg0MTMiLAogICJhdXRoX3VyaSI6ICJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20vby9vYXV0aDIvYXV0aCIsCiAgInRva2VuX3VyaSI6ICJodHRwczovL29hdXRoMi5nb29nbGVhcGlzLmNvbS90b2tlbiIsCiAgImF1dGhfcHJvdmlkZXJfeDUwOV9jZXJ0X3VybCI6ICJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9vYXV0aDIvdjEvY2VydHMiLAogICJjbGllbnRfeDUwOV9jZXJ0X3VybCI6ICJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9yb2JvdC92MS9tZXRhZGF0YS94NTA5L2F0dGVuZGFuY2Utc2hlZXQtYm90JTQwYXR0ZW5kYW5jZS01MTEwMDUuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJ1bml2ZXJzZV9kb21haW4iOiAiZ29vZ2xlYXBpcy5jb20iCn0K
+```
+
+## Step 2: Gather Required Information
+
+You need to provide the following values from your `.env` file. Please open your `.env` file and copy these values:
+
+- **CRASH_SHEET_ID**: The Google Sheet ID for Crash Course
+- **MAIN_SHEET_ID**: The Google Sheet ID for Main Course
+- **G9_SHEET_ID**: The Google Sheet ID for Grade 9
+- **G10_SHEET_ID**: The Google Sheet ID for Grade 10
+- **DASHBOARD_PASSWORD**: A secure password for accessing the dashboard
+
+You can find Sheet IDs in your Google Sheets URL:
+`https://docs.google.com/spreadsheets/d/[SHEET_ID]/edit`
+
+## Step 3: Create Streamlit Account
+
+1. Go to https://share.streamlit.io
+2. Sign up or log in with your GitHub account
+
+## Step 4: Configure Secrets in Streamlit Cloud
+
+After logging in to Streamlit Cloud:
+
+1. Click "New app"
+2. Select "From existing repo"
+3. Connect your GitHub account (if not already connected)
+4. Select the repository: `amroalmnajed/attendance-automation`
+5. Set the main file path to: `dashboard/app.py`
+6. Before clicking "Deploy", go to "Settings" → "Secrets"
+7. Add the following secrets:
+
+```toml
+# Google Service Account (base64-encoded JSON)
+GOOGLE_CREDENTIALS_B64 = "ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAgInByb2plY3RfaWQiOiAiYXR0ZW5kYW5jZS01MTEwMDUiLAogICJwcml2YXRlX2tleV9pZCI6ICI3ODFlNTJhMzEzMTYzNWE4OGZiNWE4Yjc2ZGE0YjE5ZjdlZTU2NDUyIiwKICAicHJpdmF0ZV9rZXkiOiAiLS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tXG5NSUlFdlFJQkFEQU5CZ2txaGtpRzl3MEJBUUVGQUFTQ0JLY3dnZ1NqQWdFQUFvSUJBUURjTnQ2SktrL1hsTWF5XG5IcVZsRE9hSnArSmRRNHAyenRjTkQwVzNyR0pCeXdJUGxaSWhDOVZyblQrY0M1ckZXNjlra29SNGtTY1JqVHlGXG4yc1RJQ0UxcUlOMlFVaWlTYzI4am1CR1psMTFXdHlQclBhTUtzU010TlNjU0VxbjhiOEFGUUNmdko4YWo5RUVjXG5CK0NWMlNvQXVIK2ZyVlVrV3dwaUJ1MTV4REI4NytES3pkUnRRcWoyK3h0WDltYVdmTURSRnJhMjF6c1lmK0hZXG5mN1JVVWlKVTgveGNsaHd2WXBIT3ExcWFzaEY2ZFcvTmpMTDh5ZG5ScGRUNlRJNWxldmg4Y2I4QkVmeDdpdWRpXG43Q0RFMWtkV0NyUnVONnhoREMyclYwZWlzeHlsL3BNZ3daekFpUlhnSU0wdzBrOHRPbEZVai82R0JMYjM5QzVDXG5DK3J2cnlUWkFnTUJBQUVDZ2dFQUI2VmlFYW9sN29yTVlWZmVEMFdrNVlldVBPWEE4NElZQm15TzA2TkpJQmF2XG40aUdqMnNEaDdxUWRsc255WEVMa01wNUJ1anZ6K3RDSUZ1K3pJR3psWHpkMzZmQm9WemxwMVBjTk9XTi9pcWkrXG5Od2REVjNZeURmcEgrb0VxWk1qdWhtQWxZdERqUFVNWVZhUlNZSEdUVzBZTXJGc2sxeWZRRXZwQm1aWTl4c0N1XG45T2UwdnJEZVl2Vm55UzBXUW5FN2FUNE95STl4OEZGQWRUQnFQUjN0ZU5sVUR6Wkk5c2U5VDRBWjErTktMdmJ3XG5RZk5oWlNzVTNrOXFQbnRBRVFRVXFES1RkalUwUGRVRmdSRExlcVhRcWdRTCsxWUNCZ05HcE9Vd2ZCOVFPTURqXG5QYkg2cmNoMEpwUG9oQjJKWUxhTndTOTdFSUFENnJtajAzY0RPL2NvUVFLQmdRRHUwTitXVk8zQlFKalE0SjZWXG43WGY3UXUwZWlTYWdKQUtUWWR4d0hiVkpqaG5idTZHYndtME1rWlBXanBPOUF3VnRkOG9PNnl3K3Z1SVcvYTdzXG4ycmZUR0JPSU1xN29aN0l6aFV1b3pWZ3VhYTkydXdHY1k3WmJrbHp1cERQRGh2SFQrMVdORlhTZk5QUHRlQkVKXG4xakxnbHFIQkJjZ3lMZTNidFFCTEVSeVpzUUtCZ1FEc0QxZ1hQS2hDelliVHAzUEhmT3NqTjN1TXZ3U0lUbW43XG5OOUc4K3ordk8yMW5ZMjcvVWtYa3VmcllYcEZwaUQ0em42aTU4ZkxnOHg2VS9iM05LY1N6bnRmZUxhaC9rZUJRXG5vT1hndHBvRTZyT09Va3FOdyt6V2hheWZLU2lnUlpIV2laUyt2OUpnS2lERThZRzFJN3hLelRSYmlwUGk3VW0wXG5zcU8wcjFWZnFRS0JnRndzdEUraXdnMTM4RU9XbnI4QlkvRFAyUk9USGh4ckthOVc4eTAyMmpUa3F1aGJtRG0xXG5Kai9XcEhnSW1jODNMazRkRVJrRy9oSE52UmZnbkRhQkNMaHFMNGUvQURGbGJLdGtCRnJIdndSUytFMWNTbmZoXG5LSTVaaEpMN1A1dDFKenVKWTNETDJqSmt6czFXTFVWZHJrOXU5RW03QUpVVmt4dmMxWnNqcEtWUkFvR0FldmRuXG5RUHVFL3YrSEcxd2dVS3QrNVdKeWhwZStxYTZIUUtrTUpiQ1B0UjEwMlNXUDNZcWpCQW5wWktxbWZ0M000U0ZyXG5TQ21FQnJBK253Z3F4ZVBiSm1JNU92QjMxTFJOc0ZLUVRPVnlCOXVtMngxODNxcFFCbE90MzE4V1haNi80SXpjXG5vaHpVWHVtekZrUmo5OUw4czg1L1Zxd3lhMFNHWDQycS8yVlNTTGtDZ1lFQXJMdlRWRlA1NW9GdklJYmdGNDA0XG4wNER5d1pIek1XZWZvR21HZzE0OVBOamVCcmRPQWlwVnZtSVprVkVZS1pWd2VGeHJiemRWZS9QMFVTNWZBQ1ZpXG5jL1Rid0t5ZTBWU0RtUVNNSVVnN1ljOFRYckJZQkxzUmt3YlVPRzBPSWlLVDlsQ2VkV1hvckFCTkFDNUduR29WXG5YYzRReDhnVGZzem91eUVqRi9qd0dsWT1cbi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS1cbiIsCiAgImNsaWVudF9lbWFpbCI6ICJhdHRlbmRhbmNlLXNoZWV0LWJvdEBhdHRlbmRhbmNlLTUxMTAwNS5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsCiAgImNsaWVudF9pZCI6ICIxMDUwMzYwMDk4NTEwNTA4ODg0MTMiLAogICJhdXRoX3VyaSI6ICJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20vby9vYXV0aDIvYXV0aCIsCiAgInRva2VuX3VyaSI6ICJodHRwczovL29hdXRoMi5nb29nbGVhcGlzLmNvbS90b2tlbiIsCiAgImF1dGhfcHJvdmlkZXJfeDUwOV9jZXJ0X3VybCI6ICJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9vYXV0aDIvdjEvY2VydHMiLAogICJjbGllbnRfeDUwOV9jZXJ0X3VybCI6ICJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9yb2JvdC92MS9tZXRhZGF0YS94NTA5L2F0dGVuZGFuY2Utc2hlZXQtYm90JTQwYXR0ZW5kYW5jZS01MTEwMDUuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJ1bml2ZXJzZV9kb21haW4iOiAiZ29vZ2xlYXBpcy5jb20iCn0K"
+
+# Sheet IDs
+CRASH_SHEET_ID = "1nOTft1CH6OTh3cVkc2c1ZOqD-m1v7jCYM1gxIb7oRnM"
+MAIN_SHEET_ID = "1pyrm_USZr66t_V7y6R-F-JJ8wJ8kdOzrsJ-bbDX11BY"
+G9_SHEET_ID = "1CcudM6UbwRQK8Ro3wHg6j9aHhvYGyCqt3gzl4JSTBJU"
+G10_SHEET_ID = "1vuOBu3JJqWUa0uCY6rmdwJbkZeqJ6QPhx6519gvQS10"
+
+# Tab names (optional, using defaults)
+CRASH_TAB = "Attendance"
+MAIN_TAB = "Attendance"
+G9_TAB = "Attendance"
+G10_TAB = "Attendance"
+REVIEW_TAB = "ReviewQueue"
+
+# Session patterns (optional, using defaults)
+CRASH_SESSION_PATTERN = "^Session\\s+\\d+$"
+MAIN_SESSION_PATTERN = "^Session\\s+\\d+$"
+G9_SESSION_PATTERN = "^S\\d+$"
+G10_SESSION_PATTERN = "^S\\d+$"
+G9_ATTENDANCE_PATTERN = "^S\\d+\\s+Attendance$"
+G10_ATTENDANCE_PATTERN = "^S\\d+\\s+Attendance$"
+
+# Dashboard password (REQUIRED - choose a strong password)
+DASHBOARD_PASSWORD = "SET_YOUR_SECURE_PASSWORD_HERE"
+```
+
+## Step 5: Deploy
+
+1. After configuring secrets, click "Deploy"
+2. Wait for the deployment to complete (usually 1-2 minutes)
+3. Streamlit Cloud will build and start your app
+
+## Step 6: Verify Deployment
+
+1. Once deployed, open the app URL provided by Streamlit
+2. Enter your dashboard password
+3. Verify:
+   - Course selector shows your configured courses
+   - Review Queue page loads (if you have pending items)
+   - Attendance page loads with session selector
+   - Refresh button works
+
+## Troubleshooting
+
+### App won't start
+- Check the logs in Streamlit Cloud (click "Logs" in the app settings)
+- Verify all secrets are set correctly
+- Ensure `requirements.txt` is in the dashboard folder
+
+### Sheet connection errors
+- Verify `GOOGLE_CREDENTIALS_B64` is correctly base64-encoded
+- Ensure the service account has editor access to your Google Sheets
+- Check that sheet IDs are correct
+
+### ReviewQueue tab not found
+- Verify the tab name in your Google Sheets matches the default "ReviewQueue"
+- Or set `REVIEW_TAB` in secrets to match your actual tab name
+
+### Password not working
+- Check that `DASHBOARD_PASSWORD` is set in secrets
+- Try clearing browser cache and re-entering password
+
+## Security Notes
+
+⚠️ **Important:**
+- The password is the only authentication mechanism in this MVP
+- Choose a strong, unique password
+- Rotate the password periodically
+- Do not share the app URL with unauthorized users
+
+## Free Tier Constraints
+
+Streamlit Community Cloud free tier has:
+- 1 GB RAM
+- No persistent disk storage
+- CPU time limits
+
+The dashboard is designed to work within these constraints:
+- All data lives in Google Sheets (no local state)
+- Cache TTL of 60 seconds for sheet reads
+- Memory-efficient pandas operations
+- No background processes
