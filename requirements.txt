@@ -14,6 +14,7 @@ Pillow>=10.0.0
 
 # Name matching
 rapidfuzz>=3.0.0
+jellyfish>=1.0.0
 
 # Config & utilities
 PyYAML>=6.0

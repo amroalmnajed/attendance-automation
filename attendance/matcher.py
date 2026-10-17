@@ -68,6 +68,52 @@ class MatchResult:
     paper_row_index: int = 0
 
 
+# ─── T13: Phonetic matching helpers (Soundex + Metaphone) ──────────────────────
+
+def phonetic_tokens_match(t1: str, t2: str) -> bool:
+    """True if two name tokens sound identical under Soundex or Metaphone."""
+    if not t1 or not t2:
+        return False
+    if t1.lower() == t2.lower():
+        return True
+    try:
+        import jellyfish
+        if jellyfish.soundex(t1) == jellyfish.soundex(t2):
+            return True
+        if jellyfish.metaphone(t1) == jellyfish.metaphone(t2):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def phonetic_similarity(name1: str, name2: str) -> float:
+    """Compute phonetic similarity between two multi-word names (0.0 to 1.0).
+
+    Returns the proportion of phonetically matching tokens over max(len(t1), len(t2)).
+    """
+    t1 = [w for w in name1.lower().split() if w]
+    t2 = [w for w in name2.lower().split() if w]
+    if not t1 or not t2:
+        return 0.0
+
+    max_len = max(len(t1), len(t2))
+    matched = 0
+    used_j = set()
+    for w1 in t1:
+        for j, w2 in enumerate(t2):
+            if j not in used_j and phonetic_tokens_match(w1, w2):
+                matched += 1
+                used_j.add(j)
+                break
+    return matched / max_len
+
+
+def phonetic_match(name1: str, name2: str, threshold: float = 0.8) -> bool:
+    """True if name1 and name2 are phonetically consistent (similarity >= threshold)."""
+    return phonetic_similarity(name1, name2) >= threshold
+
+
 # ─── Matcher class ────────────────────────────────────────────────────────────
 
 class Matcher:
@@ -83,6 +129,7 @@ class Matcher:
         t_soft: Optional[float] = None,
         margin_strong: float = 20.0,
         alias_lookup: Optional[Callable[[str], Optional[str]]] = None,
+        use_phonetic: bool = True,
     ):
         self.t_high = t_high
         self.margin = margin
@@ -95,6 +142,7 @@ class Matcher:
         self.margin_strong = margin_strong
         # raw paper name -> learned roster name (from human review decisions), or None.
         self.alias_lookup = alias_lookup
+        self.use_phonetic = use_phonetic
 
         # Set of roster rows already claimed in this upload (prevents collisions)
         self._claimed: set[int] = set()
@@ -222,7 +270,14 @@ class Matcher:
             and best.score >= self.t_soft
             and lead >= self.margin_strong
         )
-        if not strong_lane:
+        # T13: Phonetic fallback lane for borderline fuzzy match scores
+        phonetic_lane = (
+            self.use_phonetic
+            and lead >= self.margin
+            and best.score >= max(self.review_floor, self.t_high - 15.0)
+            and phonetic_match(query, self._norm(best.roster_name))
+        )
+        if not strong_lane and not phonetic_lane:
             if best.score < self.t_high or lead < self.margin:
                 return make_result(MatchDecision.REVIEW, ReasonCode.MATCH_AMBIGUOUS)
 
@@ -288,4 +343,5 @@ def build_matcher(cfg: dict, alias_lookup: Optional[Callable[[str], Optional[str
         min_tokens_for_auto=int(cfg.get("min_tokens_for_auto", 2)),
         weight_sort=float(cfg.get("weights", {}).get("token_sort", 0.5)),
         weight_set=float(cfg.get("weights", {}).get("token_set", 0.5)),
+        use_phonetic=bool(cfg.get("use_phonetic", cfg.get("phonetic", True))),
     )
