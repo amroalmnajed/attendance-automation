@@ -157,11 +157,8 @@ def _page_zoom() -> None:
 
 
 def _page_review() -> None:
-    st.header("🔍 Review Queue")
-    st.info(
-        "Review queue screen (W5) — reads the real SQLite queue via "
-        "`attendance.review_queue.ReviewQueue`, renders cards, calls `resolve_item()`."
-    )
+    from webapp.pages.review import _page_review as render_review
+    render_review()
 
 
 def _page_viewer() -> None:
