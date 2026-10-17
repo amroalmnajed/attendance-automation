@@ -61,6 +61,41 @@ def is_transient(exc: BaseException, *, include_quota: bool = True) -> bool:
     return status in TRANSIENT_STATUS
 
 
+from tenacity import (
+    Retrying,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+    wait_none,
+    wait_random_exponential,
+)
+
+
+def make_tenacity_retry(
+    max_attempts: int = 5,
+    base_s: float = 1.0,
+    cap_s: float = 32.0,
+    jitter: bool = True,
+    include_quota: bool = True,
+):
+    """Create a configured tenacity retry decorator for transient network calls."""
+    if base_s <= 0:
+        wait_strategy = wait_none()
+    elif jitter:
+        wait_strategy = wait_random_exponential(multiplier=base_s, max=cap_s)
+    else:
+        wait_strategy = wait_exponential(multiplier=base_s, max=cap_s)
+
+    return retry(
+        stop=stop_after_attempt(max(1, int(max_attempts))),
+        wait=wait_strategy,
+        retry=retry_if_exception(lambda exc: is_transient(exc, include_quota=include_quota)),
+        sleep=time.sleep,
+        reraise=True,
+    )
+
+
 def retry_call(
     fn: Callable[[], T],
     *,
@@ -72,31 +107,46 @@ def retry_call(
     include_quota: bool = True,
     context: Optional[dict[str, Any]] = None,
 ) -> T:
-    """Call fn(), retrying transient errors with exponential backoff (+ jitter).
+    """Call fn(), retrying transient errors with exponential backoff (+ jitter) via tenacity.
 
     Non-transient errors, and the final transient error, are re-raised unchanged.
     """
     max_attempts = max(1, int(max_attempts))
     ctx = dict(context or {})
-    for attempt in range(1, max_attempts + 1):
-        try:
-            return fn()
-        except Exception as exc:
-            transient = is_transient(exc, include_quota=include_quota)
-            if not transient or attempt >= max_attempts:
-                log.error(
-                    "net_call_failed",
-                    extra={**ctx, "op": op, "attempt": attempt, "transient": transient,
-                           "status": http_status(exc), "error": str(exc)[:200]},
-                )
-                raise
-            delay = min(base_s * (2 ** (attempt - 1)), cap_s)
-            if jitter:
-                delay *= 0.5 + random.random() * 0.5
-            log.warning(
-                "net_call_retry",
-                extra={**ctx, "op": op, "attempt": attempt, "status": http_status(exc),
-                       "delay_s": round(delay, 2), "error": str(exc)[:200]},
-            )
-            time.sleep(delay)
-    raise RuntimeError(f"{op}: exhausted retries")  # unreachable
+
+    def _before_sleep(retry_state):
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        attempt = retry_state.attempt_number
+        delay = retry_state.next_action.sleep if retry_state.next_action else 0.0
+        log.warning(
+            "net_call_retry",
+            extra={**ctx, "op": op, "attempt": attempt, "status": http_status(exc),
+                   "delay_s": round(delay, 2), "error": str(exc)[:200]},
+        )
+
+    if base_s <= 0:
+        wait_strategy = wait_none()
+    elif jitter:
+        wait_strategy = wait_random_exponential(multiplier=base_s, max=cap_s)
+    else:
+        wait_strategy = wait_exponential(multiplier=base_s, max=cap_s)
+
+    retrying = Retrying(
+        stop=stop_after_attempt(max_attempts),
+        wait=wait_strategy,
+        retry=retry_if_exception(lambda exc: is_transient(exc, include_quota=include_quota)),
+        sleep=time.sleep,
+        before_sleep=_before_sleep,
+        reraise=True,
+    )
+
+    try:
+        return retrying(fn)
+    except Exception as exc:
+        transient = is_transient(exc, include_quota=include_quota)
+        log.error(
+            "net_call_failed",
+            extra={**ctx, "op": op, "attempt": max_attempts, "transient": transient,
+                   "status": http_status(exc), "error": str(exc)[:200]},
+        )
+        raise
