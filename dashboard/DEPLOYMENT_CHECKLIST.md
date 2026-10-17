@@ -34,7 +34,7 @@ After logging in to Streamlit Cloud:
 2. Select "From existing repo"
 3. Connect your GitHub account (if not already connected)
 4. Select the repository: `amroalmnajed/attendance-automation`
-5. Set the main file path to: `dashboard/app.py`
+5. Set the main file path to: `app.py` (the root app.py now redirects to dashboard)
 6. Before clicking "Deploy", go to "Settings" → "Secrets"
 7. Add the following secrets:
 
