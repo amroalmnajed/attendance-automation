@@ -30,13 +30,22 @@ The `.env.local` file contains:
 - ✅ Password gate (single-password authentication)
 - ✅ Secrets read from `st.secrets` in cloud deployment
 - ✅ No hardcoded credentials in code
+- ✅ User name input for audit trail (resolved_by column)
+- ✅ Batched Sheets API calls to respect quota limits
+- ✅ Minimal service account scope (spreadsheets only, no drive)
 
 ### What's MVP-Only (Upgrade Needed for Production):
 - ⚠️ Single password for all users (no individual accounts)
 - ⚠️ No role-based access control (RBAC)
-- ⚠️ `resolved_by` is hardcoded to "admin" (no real audit trail)
+- ⚠️ User name is free-text input (no authentication, easy to spoof)
 - ⚠️ No rate limiting
 - ⚠️ No audit logging
+- ⚠️ No session timeout
+- ⚠️ Session-column matching uses heuristic regex (word-boundary matching of session_num in column names)
+    - Fixed the "1" → "Session 10" bug with word boundaries, but still relies on pattern matching
+    - Dashboard uses separate Google Sheets ReviewQueue tab from bot's local SQLite queue
+    - Column name is not stored at write time, reconstructed at read time
+    - Consider adding a `session_column` field to ReviewQueue schema if session naming schemes diverge
 
 ---
 
@@ -78,7 +87,7 @@ The `.env.local` file contains:
 - ⚠️ Anyone with app URL can attempt to access (protected by password)
 
 ### Google Sheets
-- ✅ Service account has scoped permissions (spreadsheets, drive)
+- ✅ Service account has scoped permissions (spreadsheets only)
 - ✅ Service account can be revoked at any time
 - ⚠️ Sheet sharing should be reviewed regularly
 - ⚠️ Consider separate service accounts per environment

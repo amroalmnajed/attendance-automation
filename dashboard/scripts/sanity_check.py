@@ -28,7 +28,6 @@ if not os.getenv("GOOGLE_CREDENTIALS_B64"):
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
 ]
 
 

@@ -26,7 +26,6 @@ if os.path.exists(parent_env):
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
 ]
 
 TEST_ITEMS = [

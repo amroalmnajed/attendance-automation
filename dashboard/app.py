@@ -46,6 +46,20 @@ def sidebar() -> str:
         st.caption("Review · Fix · Understand")
         st.divider()
 
+        # User name input for audit trail
+        if "user_name" not in st.session_state:
+            st.session_state.user_name = ""
+
+        user_name = st.text_input(
+            "Your name (for audit log)",
+            value=st.session_state.user_name,
+            placeholder="Enter your name",
+            key="user_name_input"
+        )
+        st.session_state.user_name = user_name
+
+        st.divider()
+
         available = [c for c in COURSES if c.sheet_id]
         if not available:
             st.error("No courses configured. Set *_SHEET_ID in .env or st.secrets.")

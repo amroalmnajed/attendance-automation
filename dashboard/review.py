@@ -104,10 +104,9 @@ def approve_selected(selected: pd.DataFrame, course: CourseConfig) -> None:
     # Load the main attendance sheet
     att_df, _, session_cols = sheets.load_attendance(course)
 
-    # Load review queue for updates
-    review_df, _ = sheets.load_review_queue(course)
-
-    success_count = 0
+    # Prepare batch updates
+    attendance_updates = []
+    review_updates = []
     errors = []
 
     for idx, row in selected.iterrows():
@@ -159,36 +158,21 @@ def approve_selected(selected: pd.DataFrame, course: CourseConfig) -> None:
             errors.append(f"Student '{resolved_name}' already has '{existing_value}' for {session_col_name}")
             continue
 
-        # Write to attendance sheet
-        try:
-            # Write to main attendance sheet
-            written = sheets.write_attendance(
-                course=course,
-                student_name=resolved_name,
-                session_column=session_col_name,
-                value=resolved_value,
-            )
+        # Add to batch updates
+        attendance_updates.append((resolved_name, session_col_name, resolved_value))
+        resolved_by = st.session_state.get("user_name", "admin") or "admin"
+        review_updates.append((item_id, resolved_name, resolved_value, resolved_by))
 
-            if not written:
-                errors.append(f"Failed to write '{resolved_name}' to {session_col_name}")
-                continue
+    # Execute batch writes
+    att_success_count, att_errors = sheets.batch_write_attendance(course, attendance_updates)
+    errors.extend(att_errors)
 
-            # Update review item status
-            sheets.update_review_item(
-                course=course,
-                item_id=item_id,
-                resolved_name=resolved_name,
-                resolved_value=resolved_value,
-                resolved_by="admin",  # TODO: Get from session state when proper auth is added
-            )
-
-            success_count += 1
-        except Exception as e:
-            errors.append(f"Error writing '{resolved_name}': {e}")
+    review_success_count, review_errors = sheets.batch_update_review_items(course, review_updates)
+    errors.extend(review_errors)
 
     # Show results
-    if success_count > 0:
-        st.success(f"Successfully approved {success_count} items")
+    if att_success_count > 0:
+        st.success(f"Successfully approved {att_success_count} items")
     if errors:
         with st.expander("Errors occurred (click to expand)", expanded=False):
             for err in errors:

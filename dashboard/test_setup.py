@@ -20,6 +20,7 @@ print("2. Testing credentials...")
 try:
     creds = get_credentials_json()
     print(f"   - Credentials loaded (project_id: {creds.get('project_id', 'N/A')})")
+    print(f"   - Scopes: {creds.get('scopes', [])}")
 except Exception as e:
     print(f"   - ERROR: {e}")
 print()

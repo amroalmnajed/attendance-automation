@@ -27,7 +27,6 @@ dashboard_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
 ]
 
 REVIEW_HEADERS = [

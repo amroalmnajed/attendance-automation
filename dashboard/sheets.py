@@ -21,7 +21,6 @@ from config import (
 
 _SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
 ]
 
 
@@ -177,10 +176,10 @@ def write_attendance(
     student_name: str,
     session_column: str,
     value: str,
-) -> bool:
+) -> tuple[bool, str]:
     """
     Write an attendance value to the main attendance sheet.
-    Returns True on success, False on failure.
+    Returns (success, error_message).
     """
     try:
         ws = _worksheet(course.sheet_id, course.tab_name)
@@ -188,7 +187,7 @@ def write_attendance(
         # Find the student row
         values = ws.get_all_values()
         if not values:
-            return False
+            return False, "Sheet is empty"
 
         headers = values[0]
         session_cols = find_session_columns(headers, course.session_pattern, course.attendance_pattern)
@@ -196,7 +195,7 @@ def write_attendance(
 
         # Find the session column index
         if session_column not in session_cols:
-            return False
+            return False, f"Session column '{session_column}' not found in sheet"
         session_col_idx = session_cols[session_column]
 
         # Find the student row
@@ -204,18 +203,82 @@ def write_attendance(
             if len(row) > name_idx and row[name_idx].strip() == student_name:
                 # Check if already has a value
                 if len(row) > session_col_idx and row[session_col_idx].strip():
-                    return False  # Already has a value (idempotency)
+                    return False, f"Student '{student_name}' already has a value in '{session_column}'"
 
                 # Write the value
                 ws.update_cell(row_idx, session_col_idx + 1, value)  # +1 because gspread is 1-indexed
                 bust_cache()  # Invalidate cache after write
-                return True
+                return True, ""
 
-        return False  # Student not found
+        return False, f"Student '{student_name}' not found in roster"
     except Exception as e:
         import logging
         logging.exception(f"Failed to write attendance for {student_name}: {e}")
-        return False
+        return False, f"Write failed: {e}"
+
+
+def batch_write_attendance(
+    course: CourseConfig,
+    updates: list[tuple[str, str, str]],  # (student_name, session_column, value)
+) -> tuple[int, list[str]]:
+    """
+    Batch write multiple attendance values to the main attendance sheet.
+    Returns (success_count, error_messages).
+    """
+    if not updates:
+        return 0, []
+
+    try:
+        ws = _worksheet(course.sheet_id, course.tab_name)
+
+        # Load sheet data once
+        values = ws.get_all_values()
+        if not values:
+            return 0, ["Sheet is empty"]
+
+        headers = values[0]
+        session_cols = find_session_columns(headers, course.session_pattern, course.attendance_pattern)
+        name_idx = find_name_column(headers, session_cols)
+
+        # Prepare batch updates
+        batch_updates = []
+        errors = []
+
+        for student_name, session_column, value in updates:
+            # Find the session column index
+            if session_column not in session_cols:
+                errors.append(f"Session column '{session_column}' not found for student '{student_name}'")
+                continue
+
+            session_col_idx = session_cols[session_column]
+
+            # Find the student row
+            student_found = False
+            for row_idx, row in enumerate(values[1:], start=2):
+                if len(row) > name_idx and row[name_idx].strip() == student_name:
+                    student_found = True
+                    # Check if already has a value
+                    if len(row) > session_col_idx and row[session_col_idx].strip():
+                        errors.append(f"Student '{student_name}' already has a value in '{session_column}'")
+                        break
+
+                    # Add to batch updates
+                    batch_updates.append((row_idx, session_col_idx + 1, value))  # +1 for gspread 1-indexed
+                    break
+
+            if not student_found:
+                errors.append(f"Student '{student_name}' not found in roster")
+
+        # Execute batch update
+        if batch_updates:
+            ws.batch_update(batch_updates)
+            bust_cache()
+
+        return len(batch_updates), errors
+    except Exception as e:
+        import logging
+        logging.exception(f"Failed to batch write attendance: {e}")
+        return 0, [f"Batch write failed: {e}"]
 
 
 def update_review_item(
@@ -224,10 +287,10 @@ def update_review_item(
     resolved_name: str,
     resolved_value: str,
     resolved_by: str,
-) -> bool:
+) -> tuple[bool, str]:
     """
     Update a review item to mark it as resolved.
-    Returns True on success, False on failure.
+    Returns (success, error_message).
     """
     try:
         ws = _worksheet(course.sheet_id, course.review_tab)
@@ -235,12 +298,12 @@ def update_review_item(
         # Find the item row by id
         values = ws.get_all_values()
         if not values:
-            return False
+            return False, "Review queue sheet is empty"
 
         headers = values[0]
         id_idx = headers.index("id") if "id" in headers else -1
         if id_idx == -1:
-            return False
+            return False, "'id' column not found in review queue"
 
         for row_idx, row in enumerate(values[1:], start=2):
             if len(row) > id_idx and row[id_idx] == item_id:
@@ -269,10 +332,84 @@ def update_review_item(
                 if updates:
                     ws.batch_update(updates)
                     bust_cache()  # Invalidate cache after write
-                return True
+                return True, ""
 
-        return False  # Item not found
+        return False, f"Review item '{item_id}' not found"
     except Exception as e:
         import logging
         logging.exception(f"Failed to update review item {item_id}: {e}")
-        return False
+        return False, f"Update failed: {e}"
+
+
+def batch_update_review_items(
+    course: CourseConfig,
+    updates: list[tuple[str, str, str, str]],  # (item_id, resolved_name, resolved_value, resolved_by)
+) -> tuple[int, list[str]]:
+    """
+    Batch update multiple review items to mark them as resolved.
+    Returns (success_count, error_messages).
+    """
+    if not updates:
+        return 0, []
+
+    try:
+        ws = _worksheet(course.sheet_id, course.review_tab)
+
+        # Load sheet data once
+        values = ws.get_all_values()
+        if not values:
+            return 0, ["Review queue sheet is empty"]
+
+        headers = values[0]
+        id_idx = headers.index("id") if "id" in headers else -1
+        if id_idx == -1:
+            return 0, ["'id' column not found in review queue"]
+
+        # Prepare batch updates
+        batch_updates = []
+        errors = []
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Find column indices once
+        status_idx = headers.index("status") if "status" in headers else -1
+        resolved_name_idx = headers.index("resolved_name") if "resolved_name" in headers else -1
+        resolved_value_idx = headers.index("resolved_value") if "resolved_value" in headers else -1
+        resolved_by_idx = headers.index("resolved_by") if "resolved_by" in headers else -1
+        resolved_at_idx = headers.index("resolved_at") if "resolved_at" in headers else -1
+
+        # Build lookup of item_id -> row_idx
+        id_to_row = {}
+        for row_idx, row in enumerate(values[1:], start=2):
+            if len(row) > id_idx and row[id_idx]:
+                id_to_row[row[id_idx]] = row_idx
+
+        # Process each update
+        for item_id, resolved_name, resolved_value, resolved_by in updates:
+            if item_id not in id_to_row:
+                errors.append(f"Review item '{item_id}' not found")
+                continue
+
+            row_idx = id_to_row[item_id]
+
+            # Add to batch updates
+            if status_idx >= 0:
+                batch_updates.append((row_idx, status_idx + 1, "approved"))
+            if resolved_name_idx >= 0:
+                batch_updates.append((row_idx, resolved_name_idx + 1, resolved_name))
+            if resolved_value_idx >= 0:
+                batch_updates.append((row_idx, resolved_value_idx + 1, resolved_value))
+            if resolved_by_idx >= 0:
+                batch_updates.append((row_idx, resolved_by_idx + 1, resolved_by))
+            if resolved_at_idx >= 0:
+                batch_updates.append((row_idx, resolved_at_idx + 1, now))
+
+        # Execute batch update
+        if batch_updates:
+            ws.batch_update(batch_updates)
+            bust_cache()
+
+        return len(updates) - len(errors), errors
+    except Exception as e:
+        import logging
+        logging.exception(f"Failed to batch update review items: {e}")
+        return 0, [f"Batch update failed: {e}"]
