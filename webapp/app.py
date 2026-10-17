@@ -162,11 +162,8 @@ def _page_review() -> None:
 
 
 def _page_viewer() -> None:
-    st.header("📊 Attendance Viewer")
-    st.info(
-        "Attendance viewer & reporting (W6) — sourced via `attendance.history`, "
-        "matching what `/report` and `/streaks` show bot users."
-    )
+    from webapp.pages.viewer import _page_viewer as render_viewer
+    render_viewer()
 
 
 def _page_admin() -> None:
