@@ -24,9 +24,17 @@ GREEN_AT = 85      # >= 85  -> 🟢
 YELLOW_AT = 70     # 70-84  -> 🟡, below -> 🔴
 
 
+_MARKDOWN_SPECIAL = re.compile(r"([_*`\[\]])")
+
+
 def escape_markdown(text: object) -> str:
-    """Escape Telegram legacy-Markdown specials (_ * ` [) so a student's scribble can't break the card."""
-    return re.sub(r"([_*`\[])", r"\\\1", str(text))
+    """Escape Telegram legacy-Markdown specials (_ * ` [ ]) so a student's name can't break the card.
+
+    Legacy Markdown parses *bold*, _italic_, `code`, and [text](url) links.
+    We escape * _ ` [ ] so that any combination of these characters in a student
+    name (e.g. ``Al-*Hassan* (iPad)`` or ``[iPad]``) renders as plain text.
+    """
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", str(text))
 
 
 def traffic_light(pct: float) -> str:

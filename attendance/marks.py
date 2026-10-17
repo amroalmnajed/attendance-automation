@@ -182,20 +182,21 @@ def has_issues(parsed: list[ParsedLine]) -> bool:
 def format_preview(parsed: list[ParsedLine], *, max_lines: int = 40, markdown: bool = False) -> str:
     """Short, human-readable "how I read your list" preview.
 
-    Plain text by default; ``markdown=True`` is not used for names (they may contain
-    Markdown-reserved characters), only for the header, so output is safe either way.
+    Plain text by default; when ``markdown=True``, names are escaped so Markdown-reserved
+    characters do not break parsing.
     """
     counts = {"Present": 0, "Late": 0, "Absent": 0, "Not complete": 0}
     unrecognized = 0
     rows: list[str] = []
     for p in parsed:
+        name_disp = re.sub(r"([_*`\[\]])", r"\\\1", p.name) if markdown else p.name
         if p.kind == KIND_UNRECOGNIZED:
             unrecognized += 1
-            rows.append(f"{p.index}. {p.name} → ⚠️ “{p.mark_raw}” not recognised (will go to review)")
+            rows.append(f"{p.index}. {name_disp} → ⚠️ “{p.mark_raw}” not recognised (will go to review)")
             continue
         counts[p.canonical or DEFAULT_MARK] += 1
         suffix = " (no mark → Present)" if p.kind == KIND_DEFAULT else ""
-        rows.append(f"{p.index}. {p.name} → {p.canonical}{suffix}")
+        rows.append(f"{p.index}. {name_disp} → {p.canonical}{suffix}")
 
     shown = rows[:max_lines]
     if len(rows) > max_lines:
@@ -204,5 +205,5 @@ def format_preview(parsed: list[ParsedLine], *, max_lines: int = 40, markdown: b
     tally = " · ".join(f"{k} {v}" for k, v in counts.items() if v)
     if unrecognized:
         tally += (" · " if tally else "") + f"Needs review {unrecognized}"
-    header = f"🔎 How I read your list ({len(parsed)} line{'s' if len(parsed) != 1 else ''})"
+    header = f"🔎 *How I read your list* ({len(parsed)} line{'s' if len(parsed) != 1 else ''})" if markdown else f"🔎 How I read your list ({len(parsed)} line{'s' if len(parsed) != 1 else ''})"
     return "\n".join([header, tally, "", *shown]).rstrip()

@@ -25,6 +25,7 @@ from attendance.bot.common import (
     _user_error_message,
     log,
 )
+from attendance.bot.cards import escape_markdown
 from attendance.bot.review import _deliver_summary
 
 
