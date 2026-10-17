@@ -145,7 +145,8 @@ def run(
 
     try:
         ocr_rows = _read_sheet(image_bytes=image_bytes, provider=provider, roster_names=roster_names,
-                               ocr_cfg=ocr_cfg, min_conf=min_conf, upload_id=upload_id, dry_run=dry_run)
+                               ocr_cfg=ocr_cfg, min_conf=min_conf, upload_id=upload_id, dry_run=dry_run,
+                               raw_bytes=raw_bytes, preprocess_cfg=preprocess_cfg)
     except Exception as exc:
         log.error("ocr_api_error", extra={"error": str(exc), "upload_id": upload_id})
         summary.errors.append(f"API_ERROR: OCR pass 1 failed: {exc}")
@@ -257,7 +258,7 @@ def run_multi(
         try:
             return _read_sheet(image_bytes=image_bytes, provider=provider, roster_names=roster_names,
                                ocr_cfg=ocr_cfg, min_conf=min_conf, upload_id=upload_id, photo=n,
-                               dry_run=dry_run)
+                               dry_run=dry_run, raw_bytes=raw_bytes, preprocess_cfg=preprocess_cfg)
         except Exception as exc:
             log.error("ocr_api_error", extra={"error": str(exc), "upload_id": upload_id, "photo": n})
             raise exc
@@ -848,6 +849,13 @@ def _read_sheet(*, dry_run: bool = False, **kwargs) -> list[OcrRow]:
         return _read_sheet_inner(**kwargs)
 
 
+def _avg_confidence(rows: list[OcrRow]) -> float:
+    """Return the mean confidence over all rows (0.0 when empty)."""
+    if not rows:
+        return 0.0
+    return sum(getattr(r, "confidence", 0.0) or 0.0 for r in rows) / len(rows)
+
+
 def _read_sheet_inner(
     *,
     image_bytes: bytes,
@@ -857,6 +865,8 @@ def _read_sheet_inner(
     min_conf: float,
     upload_id: str,
     photo: Optional[int] = None,
+    raw_bytes: Optional[bytes] = None,
+    preprocess_cfg: Optional[dict] = None,
 ) -> list[OcrRow]:
     """OCR one sheet image (shared by run() and run_multi()).
 
@@ -866,45 +876,89 @@ def _read_sheet_inner(
         low-confidence / unmatched, merged into just those rows (optionally with another model/provider).
     Pass-1 failure raises (caller reports it); a failed pass 2 is logged and pass 1 is used as-is.
     Retries and the 429 model fallback live inside ``provider.read`` (ocr.py / _net.py).
+
+    ``retry_preprocessing: true`` (T8): when average confidence after all normal passes is still below
+    ``min_confidence``, re-preprocess the *original* raw bytes with stronger settings
+    (``contrast=clahe, adaptive_thresh=True``) and run the provider once more.  The result with the
+    higher average confidence wins.  Disabled by default; set ``attendance.ocr.retry_preprocessing: true``.
     """
     extra = {"upload_id": upload_id} if photo is None else {"upload_id": upload_id, "photo": photo}
     log.info("ocr_pass_1", extra=extra)
     rows1 = provider.read(image_bytes, roster=roster_names)
 
     if int(ocr_cfg.get("passes", 2)) < 2:
-        return rows1
-    sp = _second_pass_settings(ocr_cfg)
+        rows_final = rows1
+    else:
+        sp = _second_pass_settings(ocr_cfg)
 
-    if sp["mode"] == "full":
-        rows2: list[OcrRow] = []
-        log.info("ocr_pass_2", extra=extra)
-        try:
-            rows2 = provider.read(image_bytes, roster=roster_names)
-        except Exception as exc:
-            log.warning("ocr_pass2_failed", extra={**extra, "error": str(exc)})
-        return _merge_passes(rows1, rows2)
+        if sp["mode"] == "full":
+            rows2: list[OcrRow] = []
+            log.info("ocr_pass_2", extra=extra)
+            try:
+                rows2 = provider.read(image_bytes, roster=roster_names)
+            except Exception as exc:
+                log.warning("ocr_pass2_failed", extra={**extra, "error": str(exc)})
+            rows_final = _merge_passes(rows1, rows2)
 
-    # mode == "low_confidence"
-    roster_aware = roster_names is not None
-    flagged = [_needs_second_look(r, min_conf, roster_aware, sp["include_unmatched"]) for r in rows1]
-    if not any(flagged):
-        log.info("ocr_pass_2_skipped", extra={**extra, "rows": len(rows1)})
-        return rows1
-    log.info("ocr_pass_2_targeted", extra={**extra, "rows": len(rows1), "rechecked": sum(flagged)})
-    try:
-        second = provider
-        if sp["model"] or sp["provider"]:
-            second_cfg = dict(ocr_cfg)
-            if sp["model"]:
-                second_cfg["model"] = sp["model"]
-            if sp["provider"]:
-                second_cfg["provider"] = sp["provider"]
-            second = build_provider(second_cfg)
-        rows2 = second.read(image_bytes, roster=roster_names)
-    except Exception as exc:
-        log.warning("ocr_pass2_failed", extra={**extra, "error": str(exc)})
-        return rows1
-    return [_merge_passes([r], rows2)[0] if hit else r for r, hit in zip(rows1, flagged)]
+        else:
+            # mode == "low_confidence"
+            roster_aware = roster_names is not None
+            flagged = [_needs_second_look(r, min_conf, roster_aware, sp["include_unmatched"]) for r in rows1]
+            if not any(flagged):
+                log.info("ocr_pass_2_skipped", extra={**extra, "rows": len(rows1)})
+                rows_final = rows1
+            else:
+                log.info("ocr_pass_2_targeted", extra={**extra, "rows": len(rows1), "rechecked": sum(flagged)})
+                try:
+                    second = provider
+                    if sp["model"] or sp["provider"]:
+                        second_cfg = dict(ocr_cfg)
+                        if sp["model"]:
+                            second_cfg["model"] = sp["model"]
+                        if sp["provider"]:
+                            second_cfg["provider"] = sp["provider"]
+                        second = build_provider(second_cfg)
+                    rows2 = second.read(image_bytes, roster=roster_names)
+                except Exception as exc:
+                    log.warning("ocr_pass2_failed", extra={**extra, "error": str(exc)})
+                    rows_final = rows1
+                else:
+                    rows_final = [_merge_passes([r], rows2)[0] if hit else r for r, hit in zip(rows1, flagged)]
+
+    # ── T8: Retry with alternative preprocessing on persistently low confidence ──
+    retry_cfg = ocr_cfg.get("retry_preprocessing", False)
+    if retry_cfg and raw_bytes is not None:
+        avg = _avg_confidence(rows_final)
+        if avg < min_conf:
+            log.info(
+                "ocr_retry_preprocess",
+                extra={**extra, "avg_conf": round(avg, 3), "min_conf": min_conf},
+            )
+            try:
+                alt_preprocess_cfg = dict(preprocess_cfg or {})
+                alt_preprocess_cfg.update({"contrast": "clahe", "adaptive_thresh": True})
+                alt_bytes = prepare(
+                    raw_bytes,
+                    orient=alt_preprocess_cfg.get("orient", True),
+                    deskew=alt_preprocess_cfg.get("deskew", True),
+                    contrast="clahe",
+                    adaptive_thresh=True,
+                    max_side_px=int(alt_preprocess_cfg.get("max_side_px", 2000)),
+                    strip_exif=alt_preprocess_cfg.get("strip_exif", True),
+                )
+                alt_rows = provider.read(alt_bytes, roster=roster_names)
+                alt_avg = _avg_confidence(alt_rows)
+                log.info(
+                    "ocr_retry_preprocess_done",
+                    extra={**extra, "orig_avg": round(avg, 3), "alt_avg": round(alt_avg, 3)},
+                )
+                if alt_avg > avg:
+                    log.info("ocr_retry_preprocess_accepted", extra=extra)
+                    rows_final = alt_rows
+            except Exception as exc:
+                log.warning("ocr_retry_preprocess_failed", extra={**extra, "error": str(exc)})
+
+    return rows_final
 
 
 def _merge_passes(pass1: list[OcrRow], pass2: list[OcrRow]) -> list[OcrRow]:

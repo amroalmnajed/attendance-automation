@@ -129,6 +129,7 @@ attendance:
       contrast: mild
       max_side_px: 2000
       strip_exif: true
+    retry_preprocessing: false         # T8: retry OCR with CLAHE+adaptive_thresh if avg confidence < min_confidence
 
   match:
     t_high: 90                      # auto-accept threshold; must have score >= 90 AND margin >= 10
