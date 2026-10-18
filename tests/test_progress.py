@@ -1,11 +1,6 @@
-"""T6 - staged progress messages: pipeline stages + the thread-safe bot callback."""
-import asyncio
-import threading
-from types import SimpleNamespace
-
+"""T6 - staged progress messages: pipeline stages."""
 from attendance import pipeline
 from attendance.config_runtime import STAGE_TEXT
-from attendance.bot.common import make_progress_callback
 from tests.test_multi_photo_pipeline import FakeProvider, env, r  # noqa: F401  (fixture reuse)
 
 
@@ -50,77 +45,7 @@ def test_dry_run_still_reports_saving(env, monkeypatch):
     assert seen[-1] == "saving"
 
 
-# ─── bot callback ─────────────────────────────────────────────────────────────
-
-class _Msg:
-    def __init__(self, fail=False):
-        self.edits, self.fail = [], fail
-
-    async def edit_text(self, text, **kw):
-        if self.fail:
-            raise RuntimeError("message is not modified")
-        self.edits.append(text)
-
-
-class _Clock:
-    def __init__(self):
-        self.t = 100.0
-
-    def __call__(self):
-        return self.t
-
-
-def _drive(msg, steps, *, initial="reading", interval=2.0):
-    """Run ``steps`` = [(seconds_to_advance, stage)] from a worker thread, like pipeline.run."""
-    async def main():
-        loop = asyncio.get_running_loop()
-        clock = _Clock()
-        cb = make_progress_callback(msg, loop, initial=initial, min_interval_s=interval, clock=clock)
-
-        def worker():
-            for dt, stage in steps:
-                clock.t += dt
-                cb(stage)
-        t = threading.Thread(target=worker)
-        t.start()
-        while t.is_alive():
-            await asyncio.sleep(0.01)
-        await asyncio.sleep(0.05)                       # let scheduled edits run
-    asyncio.run(main())
-
-
 def test_texts_are_plain_language_without_jargon():
     assert STAGE_TEXT == {"reading": "📷 Reading the photo…", "matching": "🔎 Matching names…",
                           "saving": "✍️ Saving to the sheet…"}
     assert not any(w in " ".join(STAGE_TEXT.values()) for w in ("OpenCV", "Gemini", "OCR"))
-
-
-def test_edits_happen_on_the_event_loop_in_order():
-    msg = _Msg()
-    _drive(msg, [(5, "matching"), (5, "saving")])
-    assert msg.edits == [STAGE_TEXT["matching"], STAGE_TEXT["saving"]]
-
-
-def test_initial_stage_text_is_not_resent():
-    msg = _Msg()
-    _drive(msg, [(5, "reading"), (5, "reading")])
-    assert msg.edits == []
-
-
-def test_stages_faster_than_two_seconds_are_dropped_not_delayed():
-    msg = _Msg()
-    _drive(msg, [(0.5, "matching"), (0.5, "saving"), (3.0, "saving")])
-    assert msg.edits == [STAGE_TEXT["saving"]]            # first two were inside the 2 s window
-
-
-def test_unknown_stage_and_failing_edit_are_harmless():
-    msg = _Msg(fail=True)
-    _drive(msg, [(5, "bogus"), (5, "matching")])
-    assert msg.edits == []
-
-
-def test_closed_loop_is_swallowed():
-    loop = asyncio.new_event_loop()
-    loop.close()
-    cb = make_progress_callback(SimpleNamespace(), loop, initial="reading", min_interval_s=0)
-    cb("matching")                                           # must not raise

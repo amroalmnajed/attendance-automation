@@ -13,5 +13,4 @@
    mkdir -p /app/data/review_queue /app/data/review_images /app/data/logs
    rm -rf review_images
    ln -sfn /app/data/review_images review_images
-
-   exec python -m attendance.ingest
+exec streamlit run webapp/app.py --server.port="${PORT:-8501}" --server.address=0.0.0.0

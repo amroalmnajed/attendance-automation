@@ -32,9 +32,6 @@ pre-commit>=3.6.0
 # Optional: for structured logging in production
 # python-json-logger>=2.0.0
 
-# Ingest channel
-python-telegram-bot[job-queue]>=20.0
-
 # HTTP client for Zoom API
 httpx>=0.25.0
 

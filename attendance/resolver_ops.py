@@ -1,6 +1,6 @@
 """attendance/resolver_ops.py — Shared resolution operations for ReviewQueue items.
 
-Used by both the Telegram bot callback (attendance.bot.review) and the CLI
+Used by both the webapp (webapp/pages/review.py) and the CLI
 (attendance.cli review resolve).
 """
 from __future__ import annotations

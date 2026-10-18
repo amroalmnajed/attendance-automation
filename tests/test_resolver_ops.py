@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from attendance.aliases import AliasStore
-from attendance.resolver_ops import ResolveResult, resolve_item
+from attendance.resolver_ops import ResolveResult, UndoResult, resolve_item, undo_resolution
 from attendance.review_queue import ReviewQueue
 
 
@@ -214,3 +215,107 @@ def test_resolve_item_success_flow(tmp_dir):
     assert item["resolution"]["roster_row"] == 4
     assert item["resolution"]["roster_name"] == "Candidate One"
     assert item["resolution"]["attendance_value"] == "Present"
+
+
+# ─── Unit Tests for undo_resolution ───────────────────────────────────────────
+
+def test_undo_resolution_clears_cell_and_reenqueues():
+    mock_queue = MagicMock()
+    mock_writer = MagicMock()
+
+    item = {
+        "item_id": "item123",
+        "course": "g10",
+        "session": 1,
+        "image_ref": "img.jpg",
+        "raw_name": "Ahmed Ali",
+        "raw_mark": "Present",
+        "status": "resolved",
+        "resolution": {
+            "roster_row": 5,
+            "roster_name": "Ahmed Ali",
+            "attendance_value": "Present",
+        },
+        "top3": [{"roster_name": "Ahmed Ali", "roster_row": 5, "score": 95.0}],
+    }
+    mock_queue.get.return_value = item
+
+    cfg = {
+        "attendance": {
+            "courses": {
+                "g10": {
+                    "sheet_id_env": "SHEET_G10",
+                    "tab": "Att",
+                    "first_student_row": 5,
+                    "header_row": 3,
+                    "session_header_pattern": r"^S(\d+)$",
+                }
+            },
+            "write": {"retry": {}},
+        }
+    }
+
+    mock_session = SimpleNamespace(
+        session_col="E",
+        type_col=None,
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("attendance.resolver_ops.session_resolve", lambda *a, **k: mock_session)
+        res = undo_resolution("u1", "item123", mock_queue, mock_writer, cfg)
+
+    assert res.success is True
+    assert res.cleared is True
+    assert res.re_enqueued is True
+
+    # Check cell write cleared cell
+    mock_writer.batch_write.assert_called_once()
+    written_cells = mock_writer.batch_write.call_args[0][1]
+    assert len(written_cells) == 1
+    assert written_cells[0].sheet_row == 5
+    assert written_cells[0].new_value == ""
+
+    # Check re-enqueue called
+    mock_queue.enqueue.assert_called_once()
+    eq_kw = mock_queue.enqueue.call_args[1]
+    assert eq_kw["upload_id"] == "u1"
+    assert eq_kw["course"] == "g10"
+    assert eq_kw["ocr_row"].raw_name == "Ahmed Ali"
+
+
+def test_undo_resolution_item_not_found():
+    mock_queue = MagicMock()
+    mock_queue.get.return_value = None
+    mock_queue._load.return_value = {"items": []}
+
+    res = undo_resolution("u1", "missing", mock_queue)
+    assert res.success is False
+    assert "not found" in res.error
+
+
+def test_undo_resolution_ignored_item_does_not_call_batch_write():
+    mock_queue = MagicMock()
+    mock_writer = MagicMock()
+
+    item = {
+        "item_id": "item123",
+        "course": "g10",
+        "session": 1,
+        "image_ref": "img.jpg",
+        "raw_name": "Noise",
+        "status": "resolved",
+        "resolution": {
+            "roster_row": 0,
+            "roster_name": "IGNORED",
+            "attendance_value": "Absent",
+        },
+        "top3": [],
+    }
+    mock_queue.get.return_value = item
+
+    res = undo_resolution("u1", "item123", mock_queue, mock_writer)
+    assert res.success is True
+    assert res.cleared is False
+    assert res.re_enqueued is True
+    mock_writer.batch_write.assert_not_called()
+

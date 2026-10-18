@@ -8,7 +8,6 @@ import cv2
 import numpy as np
 import pytest
 
-from attendance.bot import review
 from attendance.review_crop import MAX_SIDE_PX, _crop_image
 from attendance.review_queue import ReviewQueue
 
@@ -93,64 +92,6 @@ def test_unreadable_or_missing_file_returns_the_original_path(tmp_path):
     bad.write_bytes(b"not an image")
     assert _crop_image(str(bad), [0.1, 0.1, 0.2, 0.2]) == str(bad)
     assert _crop_image(str(tmp_path / "missing.jpg"), [0.1, 0.1, 0.2, 0.2]) == str(tmp_path / "missing.jpg")
-
-
-# ─── sender ───────────────────────────────────────────────────────────────────
-
-class _Bot:
-    def __init__(self, photo_fails=False):
-        self.sent, self.photo_fails = [], photo_fails
-
-    async def send_message(self, **kw):
-        self.sent.append(("message", kw))
-
-    async def send_photo(self, **kw):
-        if self.photo_fails:
-            raise RuntimeError("telegram said no")
-        self.sent.append(("photo", kw))
-
-
-def _run_sender(monkeypatch, image_ref, bbox, bot):
-    item = {"item_id": "i1234567890", "raw_name": "Sara", "paper_row_index": 1, "ocr_confidence": 0.8,
-            "reason_code": "MATCH_AMBIGUOUS", "image_ref": image_ref, "bounding_box": bbox,
-            "top3": [{"roster_name": "Sara Mohamed", "roster_row": 7, "score": 90}]}
-
-    class FakeQueue:
-        def __init__(self, store_dir):
-            pass
-
-        def list_pending(self, upload_id):
-            return [item]
-
-        def _load(self, upload_id):
-            return {"items": [item]}
-    monkeypatch.setattr(review, "ReviewQueue", FakeQueue)
-    made = []
-    real = review._crop_image
-    monkeypatch.setattr(review, "_crop_image", lambda p, b: made.append(real(p, b)) or made[-1])
-    asyncio.run(review._send_next_review_item(5, bot, UP, "rq"))
-    return made
-
-
-def test_temp_crop_is_sent_then_deleted_and_original_kept(monkeypatch, tmp_path):
-    src = _sheet(tmp_path)
-    bot = _Bot()
-    made = _run_sender(monkeypatch, src, [0.5, 0.1, 0.55, 0.9], bot)
-    assert bot.sent[0][0] == "photo" and made[0] != src
-    assert not os.path.exists(made[0]) and os.path.exists(src)
-
-
-def test_temp_crop_is_deleted_even_when_sending_the_photo_fails(monkeypatch, tmp_path):
-    src = _sheet(tmp_path)
-    bot = _Bot(photo_fails=True)
-    made = _run_sender(monkeypatch, src, [0.5, 0.1, 0.55, 0.9], bot)
-    assert bot.sent[0][0] == "message" and not os.path.exists(made[0]) and os.path.exists(src)
-
-
-def test_missing_image_falls_back_to_text_only(monkeypatch, tmp_path):
-    bot = _Bot()
-    _run_sender(monkeypatch, str(tmp_path / "gone.jpg"), [0.5, 0.1, 0.55, 0.9], bot)
-    assert bot.sent[0][0] == "message"
 
 
 # ─── bounding box reaches the queue ───────────────────────────────────────────

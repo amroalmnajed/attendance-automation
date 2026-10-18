@@ -1,103 +1,89 @@
 # Attendance Automation
 
-Telegram bot and web app that turn a photo of a paper attendance sheet into attendance marks in Google Sheets.
+Streamlit web app and CLI that turn a photo of a paper attendance sheet into attendance marks in Google Sheets.
 
 Photo -> OpenCV clean-up -> Gemini OCR -> fuzzy match against the roster -> Google Sheets.
-Uncertain matches go to a review queue that an admin resolves from Telegram, the CLI, or the web app.
+Uncertain matches go to a review queue that an admin resolves from the web app or the CLI.
 
 ## Interfaces
 
-The project has three interfaces:
-1. **Telegram bot** - Upload photos, paste names, resolve reviews via chat
-2. **CLI** - Command-line tools for processing and review
-3. **Web app** - Browser-based interface (see `webapp/README.md`)
-
-**Note:** The web app (`webapp/`) is the primary interface for paper attendance processing, Zoom ingestion, review queue resolution, and attendance reporting.
+1. **Web app** (`webapp/`) - Sole graphical interface for photo uploads, Zoom ingestion, review queue resolution, and attendance reporting. See `webapp/README.md`.
+2. **CLI** (`attendance/cli.py`) - Command-line tools for processing and review.
 
 ## Run
 
 ### Web App (Primary Interface)
 
-See `webapp/README.md` for setup and deployment instructions.
+1. Python 3.12 (see `.python-version`), then `pip install -r requirements.txt`.
+2. Copy `.env.example` to `.env` and fill in your actual values (`GEMINI_API_KEY`,
+   the `*_SHEET_ID` values and Google credentials (`GOOGLE_APPLICATION_CREDENTIALS`, or
+   `GOOGLE_CREDENTIALS_B64` on Railway)).
+3. Edit `config/attendance.yaml` (courses, thresholds, `dry_run_default`,
+   Zoom meeting IDs, teacher name).
+4. Start the web app:
 
 ```bash
 streamlit run webapp/app.py
 ```
 
-### Telegram Bot
+On Windows, you can also double-click `start_webapp.bat`.
 
-1. Python 3.12 (see `.python-version`), then `pip install -r requirements.txt`.
-2. Copy `.env.example` to `.env` and fill in your actual values (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`,
-   the `*_SHEET_ID` values and Google credentials (`GOOGLE_APPLICATION_CREDENTIALS`, or
-   `GOOGLE_CREDENTIALS_B64` on Railway)).
-3. Edit `config/attendance.yaml` (courses, thresholds, `dry_run_default`, admin/teacher Telegram IDs,
-   Zoom meeting IDs, teacher name).
-4. Start the bot: `python -m attendance.ingest`
-
-`dry_run_default: false` means the bot writes to the real sheets. Set it to `true` to rehearse.
+See `webapp/README.md` for detailed usage and `webapp/DEPLOY.md` for deployment.
 
 ### CLI
 
-Command-line tools for processing and review. See `attendance/cli.py` for available commands.
+Command-line tools for processing and review:
+
+```bash
+python -m attendance.cli --help
+```
 
 ## Layout
 
-- `attendance/bot/` - Telegram handlers (`app.py` wiring, `upload`, `names`, `review`, `admin`, `menu`).
-- `attendance/pipeline.py` - OCR -> match -> write. `ocr.py`, `matcher.py`, `writer.py`, `session_resolver.py`.
-- `attendance/cli.py` - command-line tools. `core/` - auth, logging, notifier.
-- `HANDOFF.md` / `PROJECT_CONTEXT.md` - working notes for whoever continues the project.
+- `webapp/` - Streamlit web app (photo upload, paste names, Zoom, review queue, viewer/reports, admin).
+- `attendance/pipeline.py` - OCR -> match -> write pipeline. `ocr.py`, `matcher.py`, `writer.py`, `session_resolver.py`.
+- `attendance/review_cards.py` - Review card formatting and traffic-light scoring.
+- `attendance/review_crop.py` - Context crop image generation for flagged items.
+- `attendance/config_runtime.py` - Pure runtime configuration and error messaging.
+- `attendance/cli.py` - Command-line interface.
+- `core/` - Auth, logging, notifier.
+- `HANDOFF.md` / `PROJECT_CONTEXT.md` - Working notes for whoever continues the project.
 
 ## Test
 
-    pip install -r requirements.txt
-    pytest -q
-    ruff check .
+```bash
+pip install -r requirements.txt
+pytest -q
+ruff check .
+```
 
 Tests never touch the network or the real sheets. `tests/tune_matcher.py` (optional) suggests
 matcher thresholds from resolved review items.
 
 ## Deploy
 
-See `DEPLOYMENT.md` (Railway and Windows service instructions).
+See `DEPLOYMENT.md` and `webapp/DEPLOY.md`.
 
 ## Zoom Attendance Automation
 
-The bot supports automated attendance processing for Zoom meetings via two methods:
+The system supports automated attendance processing for Zoom meetings via two methods in `webapp/pages/zoom.py`:
 
 ### 1. Zoom API Fetch
 Fetch participant reports directly from Zoom using the Server-to-Server OAuth app.
 
 **Zoom App Setup:**
 1. Go to [Zoom Marketplace](https://marketplace.zoom.us/) and create a Server-to-Server OAuth app
-2. Required scope: `meeting:read:list_past_participants` or `meeting:read:list_past_participants:admin` (for accessing participant reports)
-   - **Important:** Make sure to add this scope in the Zoom app settings under "Scopes" → "Add Scopes" → "Meeting" → check the participant read scope
-3. Copy the Account ID, Client ID, and Client Secret from the app credentials
-4. Store these as Railway environment variables:
-   - `ZOOM_ACCOUNT_ID` - Your Zoom account ID
-   - `ZOOM_CLIENT_ID` - OAuth app client ID
-   - `ZOOM_CLIENT_SECRET` - OAuth app client secret
-
-**Important Notes:**
-- Participant reports may not be immediately available after a meeting ends (typically a few minutes delay)
-- Zoom API has rate limits; the bot handles "report not ready yet" gracefully
-- Credentials are stored as environment variables, never committed to the repository
+2. Required scope: `meeting:read:list_past_participants` or `meeting:read:list_past_participants:admin`
+3. Set environment variables: `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`
 
 ### 2. Manual CSV Upload
-Upload Zoom participant CSV files manually via Telegram.
+Upload Zoom participant CSV files via the web app.
 
 **CSV Format:**
 - Filename: `participants_<meeting_id>_<date>.csv` (e.g., `participants_81795786552_2026_09_13.csv`)
 - Required columns: "Name (original name)", "Join time", "Leave time", "Duration (minutes)", "Guest"
-- Optional columns: "Email", "Recording disclaimer response", "In waiting room" (ignored)
-- The system calculates attendance based on join time, duration, and teacher presence
-
-**Telegram Commands:**
-- `/zoom_fetch` - Fetch participant report from Zoom API by meeting ID
-- `/zoom_upload` - Upload a CSV file manually
-- `/zoom_reprocess` - Reprocess an archived CSV file
 
 **Teacher Detection:**
-- Teacher name is configured in `config/attendance.yaml` (update the `teacher_name` field)
-- Uses fuzzy matching to detect teacher variations (e.g., "Yaman (iPad)", "Yaman (iPhone)")
+- Teacher name is configured in `config/attendance.yaml` (`teacher_name`)
+- Uses fuzzy matching to detect teacher variations
 - If teacher is not found, the system prompts for manual meeting start time
-- Teacher's presence affects the effective start time (configured buffer of 5 minutes)

@@ -1,7 +1,6 @@
 """Feature 7 — learned-alias management: dates, flags, remove (+backup), CLI, admin-only bot command."""
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import date
 from types import SimpleNamespace
@@ -11,8 +10,6 @@ import yaml
 from attendance import alias_admin, cli, pipeline, writer
 from attendance.aliases import AliasStore
 from tests.test_absent import FakeWS, cfg, fake_session  # noqa: F401  (cfg is a fixture)
-from attendance.bot import admin
-from tests.botutil import patch_bot
 
 TODAY = date(2026, 10, 11)
 
@@ -79,34 +76,6 @@ def test_cli_list_export_remove(tmp_path, capsys):
     assert json.loads(p.read_text(encoding="utf-8")) == {}
 
 
-# ─── Bot command: admin only, never open to everyone ──────────────────────────
-
-def _call(monkeypatch, cfg, user_id, args, env=None):
-    patch_bot(monkeypatch, "_load_cfg", lambda: cfg)
-    for k in ("ADMIN_TELEGRAM_IDS",):
-        monkeypatch.delenv(k, raising=False)
-    for k, v in (env or {}).items():
-        monkeypatch.setenv(k, v)
-    replies = []
-
-    async def reply(text, **_k):
-        replies.append(text)
-    upd = SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=SimpleNamespace(reply_text=reply))
-    asyncio.run(admin.cmd_aliases(upd, SimpleNamespace(args=args)))
-    return replies[0]
-
-
-def test_command_is_admins_only_when_no_admin_is_configured(monkeypatch, cfg):
-    assert "not authorised" in _call(monkeypatch, cfg, 1, [])
-
-
-def test_command_refuses_non_admins_and_serves_admins(monkeypatch, cfg, tmp_path):
-    cfg["attendance"]["match"]["aliases_file"] = str(tmp_path / "a.json")
-    (tmp_path / "a.json").write_text(json.dumps({"g10": {"x y": {"X One": 1}}}), encoding="utf-8")
-    assert "not authorised" in _call(monkeypatch, cfg, 2, ["list"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
-    assert "x y" not in _call(monkeypatch, cfg, 2, ["list"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
-    assert "x y → X One" in _call(monkeypatch, cfg, 7, ["list"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
-    assert "Removed 1" in _call(monkeypatch, cfg, 7, ["remove", "g10", "x", "y"], env={"AUTHORIZED_TELEGRAM_IDS": "7"})
 
 
 def test_admin_ids_from_config_and_env_ignore_junk():
@@ -115,15 +84,6 @@ def test_admin_ids_from_config_and_env_ignore_junk():
     assert alias_admin.admin_ids({"attendance": {}}, {}) == set()          # fake/minimal config is fine
 
 
-def test_bot_command_survives_a_broken_config(monkeypatch):
-    patch_bot(monkeypatch, "_load_cfg", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    replies = []
-
-    async def reply(text, **_k):
-        replies.append(text)
-    upd = SimpleNamespace(effective_user=SimpleNamespace(id=1), message=SimpleNamespace(reply_text=reply))
-    asyncio.run(admin.cmd_aliases(upd, SimpleNamespace(args=[])))
-    assert replies[0].startswith("❌")   # Phase 4: role check fails safe before the command runs
 
 
 # ─── Pipeline: usage dates are stamped on real runs, never on dry runs ───────

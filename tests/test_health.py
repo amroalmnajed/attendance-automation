@@ -1,5 +1,4 @@
 """Feature 13 - health and quota alerts. One rule per test; everything under tmp_path."""
-import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -9,8 +8,6 @@ import pytest
 from attendance import health, ocr, pipeline, writer
 from attendance.writer import WriteCell, batch_write
 from core import notifier
-from attendance.bot import admin
-from tests.botutil import patch_bot
 
 T0 = 1_800_000_000.0           # an arbitrary fixed "now" (epoch seconds)
 
@@ -292,33 +289,6 @@ def test_status_text_is_plain_language_with_counts(cfg):
 def test_status_text_says_when_reminders_cannot_run(cfg):
     cfg["attendance"]["reminders"] = {"enabled": True}
     assert "scheduler package is missing" in health.status_text(cfg, scheduler=False)
-
-
-def _call_health(monkeypatch, cfg, uid):
-    patch_bot(monkeypatch, "_load_cfg", lambda *a, **k: cfg)
-    replies = []
-
-    async def reply(text, **_k):
-        replies.append(text)
-    upd = SimpleNamespace(effective_user=SimpleNamespace(id=uid), message=SimpleNamespace(reply_text=reply),
-                          callback_query=None)
-    ctx = SimpleNamespace(args=[], application=SimpleNamespace(job_queue=None))   # works without the scheduler
-    asyncio.run(admin.cmd_health(upd, ctx))
-    return replies[0]
-
-
-def test_health_command_is_admin_only_and_works_without_scheduler(monkeypatch, cfg):
-    assert "System status" in _call_health(monkeypatch, cfg, 1)
-    assert "System status" in _call_health(monkeypatch, cfg, 2)     # authorized
-    assert "System status" not in _call_health(monkeypatch, cfg, 999)   # stranger
-
-
-def test_health_command_closed_when_no_admin_configured(monkeypatch, tmp_path):
-    c = make_cfg(tmp_path)
-    c["attendance"]["authorized"] = {}
-    # When no authorized users are configured, the roles system allows everyone
-    # So the health command will still work
-    assert "System status" in _call_health(monkeypatch, c, 1)
 
 
 def test_install_without_job_queue_does_not_raise(cfg):

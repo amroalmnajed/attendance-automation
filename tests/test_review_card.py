@@ -1,12 +1,7 @@
 """T7 - review card: traffic lights, plain-language reason, escaped name, unchanged callback_data."""
-import asyncio
-from types import SimpleNamespace
-
 import pytest
 
-from attendance.bot import review
 from attendance.review_cards import REASON_TEXT, escape_markdown, format_review_card, traffic_light
-from tests.botutil import patch_bot
 
 UP = "abcdef0123456789abcd"          # 20 chars; callbacks use the first 12
 
@@ -78,37 +73,3 @@ def test_heading_shows_position_and_confidence():
 def test_missing_fields_do_not_crash():
     caption, rows = format_review_card({"item_id": "x"}, upload_id=UP)
     assert "Why:" in caption and len(rows) == 2                        # no top3 -> only the 2 action rows
-
-
-# ─── the sender uses it ───────────────────────────────────────────────────────
-
-class _Bot:
-    def __init__(self):
-        self.sent = []
-
-    async def send_message(self, **kw):
-        self.sent.append(kw)
-
-    async def send_photo(self, **kw):
-        self.sent.append(kw)
-
-
-def test_sender_builds_buttons_from_the_card(monkeypatch):
-    item = _item()
-
-    class FakeQueue:
-        def __init__(self, store_dir):
-            pass
-
-        def list_pending(self, upload_id):
-            return [item]
-
-        def _load(self, upload_id):
-            return {"items": [item, {}]}
-    monkeypatch.setattr(review, "ReviewQueue", FakeQueue)
-    bot = _Bot()
-    asyncio.run(review._send_next_review_item(5, bot, UP, "rq"))
-    msg = bot.sent[0]
-    assert "Why: Two students look alike" in msg["text"] and "(2 of 2)" in msg["text"]
-    kb = msg["reply_markup"].inline_keyboard
-    assert kb[0][0].text == "🟢 Sara Mohamed (91%)" and kb[0][0].callback_data.startswith("res|abcdef012345|i1234567|7")

@@ -1,8 +1,8 @@
 @echo off
 :: ============================================================
-:: start_bot.bat - Start the Attendance Automation Telegram Bot
-:: Double-click this file to launch the bot.
-:: The window will stay open if the bot crashes so you can
+:: start_webapp.bat - Start the Attendance Automation Streamlit Web App
+:: Double-click this file to launch the web app.
+:: The window will stay open if the app crashes so you can
 :: read the error and contact your system administrator.
 :: ============================================================
 
@@ -14,14 +14,9 @@ chcp 65001 >nul 2>&1
 
 echo.
 echo  ============================================================
-echo   Attendance Automation Bot  -  Starting...
-echo   Commands available via Telegram:
-echo     /start   - Choose image or paste names
-echo     /report  - Session summary
-echo     /streaks - Chronic absentees
-echo     /revert  - Undo an upload
-echo     /pending - Show review queue
-echo   Press Ctrl+C to stop the bot.
+echo   Attendance Automation Web App  -  Starting...
+echo   Open your browser to http://localhost:8501
+echo   Press Ctrl+C to stop the server.
 echo  ============================================================
 echo.
 
@@ -53,7 +48,6 @@ if not exist ".env" (
     echo.
     echo  [ERROR] .env file not found in %~dp0
     echo          Copy .env.example to .env and fill in your keys:
-    echo            TELEGRAM_BOT_TOKEN=...
     echo            GEMINI_API_KEY=...
     echo            GOOGLE_APPLICATION_CREDENTIALS=...
     echo.
@@ -66,25 +60,24 @@ if not defined GOOGLE_APPLICATION_CREDENTIALS (
     if exist "service_account.json" set "GOOGLE_APPLICATION_CREDENTIALS=service_account.json"
 )
 
-:: --- Start the bot ---
-echo  [INFO] Bot is running. Open Telegram and send /start
+:: --- Start the webapp ---
+echo  [INFO] Starting Streamlit web app...
 echo.
-python -m attendance.ingest
+streamlit run webapp/app.py
 
-:: --- If the bot exits (crash or Ctrl+C) ---
+:: --- If the app exits (crash or Ctrl+C) ---
 echo.
 if errorlevel 1 (
-    echo  [ERROR] The bot stopped with an error ^(exit code %errorlevel%^).
+    echo  [ERROR] The web app stopped with an error ^(exit code %errorlevel%^).
     echo.
     echo  Common causes:
-    echo    - Missing or incorrect TELEGRAM_BOT_TOKEN in .env
     echo    - Missing or incorrect GEMINI_API_KEY in .env
     echo    - No internet connection
     echo    - Google service account credentials file missing or invalid
     echo.
     echo  Check the logs\ folder for details.
 ) else (
-    echo  [INFO] Bot stopped cleanly ^(Ctrl+C^).
+    echo  [INFO] Web app stopped cleanly ^(Ctrl+C^).
 )
 
 echo.

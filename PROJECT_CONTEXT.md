@@ -12,6 +12,10 @@
   - `writer.py`: Handles Google Sheets API writes and batching.
   - `session_resolver.py`: Resolves course, session, and column metadata from Sheets.
   - `review_queue.py`: Manages uncertain matches for human review.
+  - `review_cards.py`: Formats review cards and traffic-light scores.
+  - `review_crop.py`: Generates context crop images for flagged items.
+  - `config_runtime.py`: Pure runtime configuration and user-safe error messages.
+- `webapp/`: Streamlit web application (primary graphical interface).
 - `core/`: Shared utilities (`auth.py`, `logger.py`, `notifier.py`).
 - `config/`: Configuration files (`attendance.yaml`, `learned_aliases.json`, `name_variants.yaml`).
 - `tests/`: Unit and evaluation tests (pytest).
@@ -34,7 +38,7 @@
 - **Setup**: `pip install -r requirements.txt`.
 
 # Phase 4 additions (see CHANGELOG.md for config keys)
-- `attendance/roles.py` — teacher/admin ID sets (env + config), `decide(uid, level, cfg)`, `guard(level, load_cfg, get_log, deny_return)` decorator. Levels: `teacher`, `admin`, `strict_admin` (closed with no admin). In `ingest.py` use `@_guard("teacher"|"admin"|"strict_admin", conv=True)` on EVERY new handler; `tests/test_roles.py::EXPECTED_LEVEL` must list it.
+- `attendance/roles.py` — user ID sets (env + config), `decide(uid, level, cfg)`, `guard(level, load_cfg, get_log, deny_return)` decorator.
 - `attendance/reminders.py` — pure `due_reminders(now, cfg, history_reader, sent)`; `run_check` (send + remember); `install(app, load_cfg)` registers the job only if enabled AND `app.job_queue` exists.
 - `attendance/health.py` — `configure(cfg)` (no-op until called), `record(kind)` / `record_exc(seen, exc)` (never raise), `dry_run_scope`, `check_review_age`, `status_text`, `install`. State: `<review_dir>/_health/state.json`. Alerts via `core.notifier.send_text` to admins only.
 - Gotchas: health state is process-wide, so `tests/conftest.py` resets it per test; set `health._THREADED = False` in tests that check alerts. Reminders use `pytz` (no tzdata needed on Windows). Alert/reminder text must stay name-free.
@@ -51,6 +55,6 @@
 - `attendance/photos.py` — `merge_photo_rows` merges OCR rows from several photos before matching.
 - `attendance/absent.py` — "Mark N absent?" (crash/main only). Offer is recorded after each upload in `<review_dir>/_absent/<upload_id>.json` (row numbers only); the button re-reads the live sheet and writes only empty cells via `batch_write`.
 - `pipeline.run_multi()` = several photos, one `upload_id`. `pipeline.run_text(..., marks=[...])` carries per-line marks.
-- Bot: `/done` shows a parse preview; unrecognised marks ask `pv|go|fix|cancel` first (`NAMES_CONFIRM` state). Photo handler keeps `image_paths` (list) next to the old `image_path` (first photo).
+- Web app: paste-names screen shows a parse preview; unrecognised marks prompt confirmation before processing. Photo uploader supports multiple photos per upload.
 - Gotchas: `RunSummary` is logged whole by the notifier — never put student names on it. Several tests pass `MagicMock` rows, so new fields read from rows must tolerate non-int/None values. `tests/conftest.py` protects the real alias file.
 - Line endings: committed blobs are LF; the Windows working copy may show CRLF. Edit with tools that preserve each file's endings; never mass-convert. Work plan + rules: see HANDOFF.md.
