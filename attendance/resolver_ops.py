@@ -74,7 +74,7 @@ def resolve_item(
         ResolveResult indicating success, written, alias_learned, and optional error.
     """
     if cfg is None:
-        from attendance.bot.common import _load_cfg
+        from attendance.config_runtime import _load_cfg
         cfg = _load_cfg()
 
     # 1. Fetch item from queue
@@ -234,7 +234,7 @@ def undo_resolution(
 ) -> UndoResult:
     """Undo a previous resolution: clear the written cell and re-enqueue the item."""
     if cfg is None:
-        from attendance.bot.common import _load_cfg
+        from attendance.config_runtime import _load_cfg
         cfg = _load_cfg()
 
     item = queue.get(upload_id, item_id)

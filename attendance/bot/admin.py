@@ -12,7 +12,7 @@ from attendance import absent as absent_mod, alias_admin, health as health_mod
 from attendance.review_queue import ReviewQueue
 from attendance.writer import WriteCell, batch_write
 
-from attendance.bot.cards import escape_markdown
+from attendance.review_cards import escape_markdown
 from attendance.bot.common import (
     _guard,
     _load_cfg,

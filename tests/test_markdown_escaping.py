@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from attendance.bot.cards import escape_markdown, format_review_card
+from attendance.review_cards import escape_markdown, format_review_card
 from attendance.marks import format_preview, parse_lines
 from tests.botutil import patch_bot
 

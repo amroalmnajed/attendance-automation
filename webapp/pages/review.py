@@ -13,8 +13,8 @@ import streamlit as st
 import yaml
 
 from attendance import writer
-from attendance.bot.cards import format_review_card
-from attendance.bot.crop import _crop_image
+from attendance.review_cards import format_review_card
+from attendance.review_crop import _crop_image
 from attendance.review_queue import ReviewQueue
 from attendance.resolver_ops import resolve_item
 from attendance.session_resolver import resolve as session_resolve

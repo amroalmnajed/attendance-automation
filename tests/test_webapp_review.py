@@ -38,7 +38,7 @@ def test_load_config_has_local_dir():
 
 def test_format_review_card_pure():
     """Test that format_review_card is a pure function."""
-    from attendance.bot.cards import format_review_card
+    from attendance.review_cards import format_review_card
 
     # Create a mock item
     item = {
@@ -63,7 +63,7 @@ def test_format_review_card_pure():
 
 def test_crop_image_function_exists():
     """Test that _crop_image function exists and is callable."""
-    from attendance.bot.crop import _crop_image
+    from attendance.review_crop import _crop_image
 
     assert callable(_crop_image)
 

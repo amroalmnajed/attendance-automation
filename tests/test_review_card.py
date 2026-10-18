@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from attendance.bot import review
-from attendance.bot.cards import REASON_TEXT, escape_markdown, format_review_card, traffic_light
+from attendance.review_cards import REASON_TEXT, escape_markdown, format_review_card, traffic_light
 from tests.botutil import patch_bot
 
 UP = "abcdef0123456789abcd"          # 20 chars; callbacks use the first 12

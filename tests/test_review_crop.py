@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from attendance.bot import review
-from attendance.bot.crop import MAX_SIDE_PX, _crop_image
+from attendance.review_crop import MAX_SIDE_PX, _crop_image
 from attendance.review_queue import ReviewQueue
 
 UP = "abcdef0123456789abcd"

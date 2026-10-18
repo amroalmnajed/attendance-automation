@@ -13,6 +13,14 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ConversationHandler
 
 from attendance import _net, roles
+from attendance.config_runtime import (
+    COURSES,
+    STAGE_TEXT,
+    _PipelineTimeout,
+    _StaleSession,
+    _load_cfg,
+    _user_error_message,
+)
 from core.logger import get_logger
 
 
@@ -35,8 +43,6 @@ def _guard(level: str, conv: bool = False):
     return roles.guard(level, lambda: _load_cfg(), lambda: log,
                        deny_return=ConversationHandler.END if conv else None)
 
-
-COURSES = ["crash", "main", "g10", "g9"]
 
 
 # Max time the bot waits for a blocking pipeline run before telling the user.
@@ -83,19 +89,10 @@ ZOOM_SESSION_NUM = 12  # waiting for session number input
 ZOOM_CONFIRM = 13     # waiting for CONFIRM/CANCEL decision
 
 
-def _load_cfg(path: str = "config/attendance.yaml") -> dict:
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 # ─── Error-handling helpers (Phase 3) ─────────────────────────────────────────
 
-class _PipelineTimeout(Exception):
-    """Pipeline did not finish within PIPELINE_TIMEOUT_S."""
-
-
-class _StaleSession(Exception):
-    """Conversation state (user_data) is missing — e.g. bot restarted mid-flow."""
 
 
 def _require(user_data: dict, *keys: str) -> list:
@@ -105,24 +102,6 @@ def _require(user_data: dict, *keys: str) -> list:
         raise _StaleSession(str(exc)) from exc
 
 
-def _user_error_message(exc: BaseException, what: str = "sheet") -> str:
-    """Map an exception to a short user-safe message. Never includes str(exc)."""
-    if isinstance(exc, _PipelineTimeout):
-        return (f"❌ Processing the {what} took too long and was stopped. It may still finish "
-                "in the background — check /pending before sending it again.")
-    if isinstance(exc, _StaleSession):
-        return "⚠️ This session expired (the bot was restarted or reset). Please send /start and try again."
-    status = _net.http_status(exc)
-    if status == 429:
-        return "❌ Google services are busy right now (quota limit). Please wait a minute and try again."
-    if _net.is_network_error(exc) or status in _net.TRANSIENT_STATUS:
-        return "❌ Couldn't reach Google services (network problem). Please try again in a moment."
-    if status in (401, 403):
-        return "❌ The bot doesn't have permission to access the Google Sheet. Please contact the admin."
-    if isinstance(exc, OSError):
-        return "❌ A file the bot needs couldn't be read or saved. Please resend and try again."
-    return (f"❌ Something went wrong while processing the {what}. Please try again, "
-            "or contact the admin if it keeps happening.")
 
 
 async def _notify_failure(bot, chat_id: int, text: str, status_msg=None) -> None:
@@ -139,12 +118,6 @@ async def _notify_failure(bot, chat_id: int, text: str, status_msg=None) -> None
         log.error("ingest_notify_failed", extra={"chat_id": chat_id}, exc_info=True)
 
 
-# Friendly text for each pipeline stage (see attendance.pipeline.STAGE_*).
-STAGE_TEXT = {
-    "reading": "📷 Reading the photo…",
-    "matching": "🔎 Matching names…",
-    "saving": "✍️ Saving to the sheet…",
-}
 PROGRESS_MIN_INTERVAL_S = 2.0
 
 

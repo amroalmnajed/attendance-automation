@@ -4,7 +4,8 @@ import threading
 from types import SimpleNamespace
 
 from attendance import pipeline
-from attendance.bot.common import STAGE_TEXT, make_progress_callback
+from attendance.config_runtime import STAGE_TEXT
+from attendance.bot.common import make_progress_callback
 from tests.test_multi_photo_pipeline import FakeProvider, env, r  # noqa: F401  (fixture reuse)
 
 

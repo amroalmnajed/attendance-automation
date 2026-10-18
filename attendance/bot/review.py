@@ -13,8 +13,8 @@ from attendance.review_queue import ReviewQueue
 from attendance.resolver_ops import resolve_item, undo_resolution
 from attendance.session_resolver import resolve
 
-from attendance.bot.cards import escape_markdown, format_review_card
-from attendance.bot.crop import _crop_image
+from attendance.review_cards import escape_markdown, format_review_card
+from attendance.review_crop import _crop_image
 from attendance.bot.common import SEARCH_ROSTER, _guard, _load_cfg, _notify_failure, _user_error_message, log
 
 
