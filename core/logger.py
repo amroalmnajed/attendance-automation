@@ -45,7 +45,14 @@ class _JsonFormatter(logging.Formatter):
 # ─── Module-level setup ───────────────────────────────────────────────────────
 
 _LOG_DIR = Path(os.getenv("LOG_DIR", "logs")).resolve()
-_LOG_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # Repo checkout is read-only (e.g. Streamlit Community Cloud mounts
+    # /mount/src/... read-only) — fall back to a writable temp directory.
+    import tempfile
+    _LOG_DIR = Path(tempfile.gettempdir()) / "attendance-automation-logs"
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _AUDIT_PATH = _LOG_DIR / "audit.jsonl"
 
