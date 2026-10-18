@@ -1,16 +1,31 @@
-# webapp/ shares the root requirements.txt — all deps (streamlit, pandas, etc.)
-# are already declared there.  Install from the repo root:
-#
-#     pip install -r requirements.txt
-#
-# Then launch the app:
-#
-#     streamlit run webapp/app.py
-#
-# If you need to install ONLY webapp deps (e.g. on Streamlit Community Cloud),
-# copy this file and add the lines below uncommented:
-#
-# streamlit>=1.37
-# pandas>=2.2
-# PyYAML>=6.0
-# python-dotenv>=1.0.0
+# webapp/ dependencies for Streamlit Community Cloud.
+# Streamlit Cloud uses the requirements.txt closest to the main module
+# (webapp/app.py), so it does NOT fall back to the root requirements.txt —
+# this file must list everything the app actually imports.
+
+streamlit>=1.37
+
+# Google APIs (Sheets + Gemini OCR)
+google-auth>=2.20.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.90.0
+gspread>=6.0.0
+google-genai>=1.0.0
+
+# Image processing
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+
+# Name matching
+rapidfuzz>=3.0.0
+jellyfish>=1.0.0
+
+# Data / config / utils
+pandas>=2.2
+numpy>=1.26
+pydantic>=2.0
+PyYAML>=6.0
+pytz>=2023.3
+python-dotenv>=1.0.0
+tenacity>=8.2
+httpx>=0.27
