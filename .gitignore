@@ -17,6 +17,8 @@ review_queue/
 # Environment
 .env
 .envrc
+*secrets.toml
+**/.streamlit/secrets.toml
 
 # Virtual envs
 venv/

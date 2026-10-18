@@ -71,3 +71,61 @@ def test_load_config_handles_missing_file():
     # so we just verify it returns a dict when the file exists
     cfg = _load_config()
     assert isinstance(cfg, dict)
+
+
+def test_calculate_attendance_candidate_teachers_exclusion():
+    """Test that passing a list of teacher names excludes both Amro and Yaman from student results."""
+    from datetime import datetime
+    from attendance.zoom_csv import calculate_attendance
+
+    base_time = datetime(2026, 10, 17, 10, 0, 0)
+    participants = [
+        {
+            "name": "Yaman (Host)",
+            "join_time": base_time,
+            "leave_time": datetime(2026, 10, 17, 11, 30, 0),
+            "duration_minutes": 90.0,
+            "guest": False,
+        },
+        {
+            "name": "Amro Assistant",
+            "join_time": base_time,
+            "leave_time": datetime(2026, 10, 17, 11, 30, 0),
+            "duration_minutes": 90.0,
+            "guest": False,
+        },
+        {
+            "name": "Ahmed Ali",
+            "join_time": base_time,
+            "leave_time": datetime(2026, 10, 17, 11, 25, 0),
+            "duration_minutes": 85.0,
+            "guest": True,
+        },
+    ]
+
+    results = calculate_attendance(
+        participants=participants,
+        config={"teacher_fuzzy_match_threshold": 80, "min_duration_minutes": 45},
+        meeting_start_time=base_time,
+        meeting_end_time=datetime(2026, 10, 17, 11, 30, 0),
+        teacher_name=["Amro", "Yaman"],
+    )
+
+    assert results is not None
+    # Only Ahmed Ali should be in the student attendance list
+    student_names = [r[0] for r in results]
+    assert "Ahmed Ali" in student_names
+    assert not any("Yaman" in s for s in student_names)
+    assert not any("Amro" in s for s in student_names)
+
+
+def test_detect_next_session_number_basic():
+    """Test detect_next_session_number returns an integer >= 1."""
+    from webapp.config import detect_next_session_number, invalidate_session_detection_cache
+
+    invalidate_session_detection_cache()
+    # For any course, it should return an integer >= 1
+    session_num = detect_next_session_number("crash")
+    assert isinstance(session_num, int)
+    assert session_num >= 1
+

@@ -12,6 +12,7 @@ import yaml
 
 from attendance.history import count_marks, entries
 from attendance.reporter import generate_session_report, generate_streaks_report
+from attendance.review_queue import ReviewQueue
 from attendance.session_resolver import resolve as session_resolve
 from webapp.config import CONFIG_PATH, COURSES
 
@@ -132,19 +133,17 @@ def _render_session_viewer(course_key: str, course_label: str, cfg: dict, review
     col3.metric("Absent", counts["absent"])
     col4.metric("Total", len(attendance_data))
 
-    # Review backlog for this session
+    # Review backlog for this session (queried from SQLite ReviewQueue)
     review_backlog = 0
-    review_path = Path(review_dir)
-    if review_path.exists():
-        for f in review_path.glob("*.json"):
-            try:
-                import json
-                with f.open("r", encoding="utf-8") as fh:
-                    data = json.load(fh)
-                    if data.get("course") == course_key and data.get("session") == selected_session:
-                        review_backlog += len([i for i in data.get("items", []) if i.get("status") == "pending"])
-            except Exception:
-                pass
+    try:
+        queue = ReviewQueue(store_dir=review_dir)
+        all_pending = queue.list_pending()
+        review_backlog = len([
+            i for i in all_pending
+            if i.get("course") == course_key and str(i.get("session")) == str(selected_session)
+        ])
+    except Exception:
+        review_backlog = 0
 
     if review_backlog > 0:
         st.warning(f"⚠️ {review_backlog} item(s) in review queue for this session")
@@ -231,3 +230,7 @@ def _render_streaks_report(course_key: str, course_label: str, cfg: dict) -> Non
 
             except Exception as e:
                 st.error(f"Failed to generate streaks report: {str(e)}")
+
+
+if __name__ == "__main__":
+    _page_viewer()

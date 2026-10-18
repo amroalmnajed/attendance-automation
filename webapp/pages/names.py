@@ -8,7 +8,14 @@ import streamlit as st
 
 from attendance.marks import format_preview, has_issues, parse_lines, split_names_and_marks
 from attendance.pipeline import run_text
-from webapp.config import CONFIG_PATH, COURSES
+from webapp.config import (
+    CONFIG_PATH,
+    COURSES,
+    course_has_session_types,
+    detect_next_session_number,
+    get_allowed_session_types,
+    normalize_session_type,
+)
 from webapp.pages.upload import render_summary
 
 
@@ -23,28 +30,56 @@ def _page_names() -> None:
         return
 
     course_label = COURSES[course_key].label
-
     st.subheader(f"Course: {course_label}")
 
-    # Session controls
-    col1, col2 = st.columns([1, 2])
-    with col1:
+    # Session controls (crash & main have no session type; g9 & g10 do)
+    has_types = course_has_session_types(course_key)
+    session_type = None
+    default_session = detect_next_session_number(course_key)
+
+    if has_types:
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            session_num = st.number_input(
+                "Session number",
+                min_value=1,
+                max_value=999,
+                value=default_session,
+                step=1,
+                key=f"names_session_{course_key}",
+                help="The session number to write to (auto-detected from sheet)",
+            )
+            st.caption(f"Auto-detected next: **Session {default_session}**")
+        with col2:
+            allowed_types = get_allowed_session_types(course_key, int(session_num))
+            type_options = allowed_types + ["Custom / Type your own..."]
+            selected_type_option = st.selectbox(
+                "Session type",
+                options=type_options,
+                help="Select or enter session type for this course",
+            )
+            if selected_type_option == "Custom / Type your own...":
+                custom_type = st.text_input(
+                    "Type session type (e.g. sat center)",
+                    placeholder="e.g. sat center",
+                )
+                session_type = normalize_session_type(custom_type, course_key, int(session_num))
+                if custom_type and session_type != custom_type:
+                    st.caption(f"Mapped to: **{session_type}**")
+            else:
+                session_type = selected_type_option
+    else:
         session_num = st.number_input(
             "Session number",
             min_value=1,
             max_value=999,
-            value=1,
+            value=default_session,
             step=1,
-            help="The session number to write to (e.g., Session 1, Session 2, etc.)",
+            key=f"names_session_{course_key}",
+            help="The session number to write to (auto-detected from sheet)",
         )
-
-    with col2:
-        # Optional session type (only for typed_pair layouts like g9/g10)
-        session_type = st.text_input(
-            "Session type (optional)",
-            placeholder="e.g., Saturday - Center",
-            help="Required for typed_pair layouts (g9/g10). Leave blank for single-column layouts.",
-        )
+        st.caption(f"Auto-detected next: **Session {default_session}**")
+        session_type = None
 
     # Textarea for pasting names
     st.subheader("Paste names and marks")
@@ -105,31 +140,33 @@ def _page_names() -> None:
     # Process button
     st.divider()
 
+    resolved_type = normalize_session_type(session_type, course_key, int(session_num)) if session_type else None
+
     if require_confirm:
         col1, col2 = st.columns([1, 1])
         with col1:
             if st.button("✅ Process anyway", type="primary", use_container_width=True):
-                _process_names(parsed, course_key, session_num, session_type, dry_run)
+                _process_names(parsed, course_key, int(session_num), resolved_type, dry_run)
         with col2:
             if st.button("✏️ Fix input", use_container_width=True):
                 st.rerun()
     else:
         if st.button("✅ Process", type="primary", use_container_width=True):
-            _process_names(parsed, course_key, session_num, session_type, dry_run)
+            _process_names(parsed, course_key, int(session_num), resolved_type, dry_run)
 
 
 def _process_names(
     parsed: list,
     course_key: str,
     session_num: int,
-    session_type: str,
+    session_type: str | None,
     dry_run: bool,
 ) -> None:
     """Process the parsed names through the pipeline."""
     # Split into names and marks lists
     names, marks = split_names_and_marks(parsed)
 
-    # Progress callback (same stages as photo upload)
+    # Progress callback
     def progress(stage: str) -> None:
         from attendance.pipeline import STAGE_MATCHING, STAGE_READING, STAGE_SAVING
 
@@ -163,3 +200,7 @@ def _process_names(
 
         except Exception as e:
             st.error(f"Processing failed: {str(e)}")
+
+
+if __name__ == "__main__":
+    _page_names()

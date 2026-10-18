@@ -2,12 +2,6 @@
 
 Run from the repo root:
     streamlit run webapp/app.py
-
-This webapp replaces the Telegram bot as the primary interface by calling the
-same attendance/pipeline.py functions the bot and CLI call.  See HANDOFF_WEBAPP.md
-for the full task list and rules.
-
-W1: scaffold, auth gate, sidebar with course selector, empty page stubs.
 """
 from __future__ import annotations
 
@@ -15,8 +9,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Ensure the repo root is on sys.path so that attendance.*, core.* imports
-# work regardless of where Streamlit was launched from.
+# Ensure the repo root is on sys.path so that attendance.*, core.* imports work
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
@@ -24,7 +17,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import streamlit as st  # noqa: E402 (must come after sys.path fixup)
 
-from webapp.config import COURSES, _secret  # noqa: E402
+from webapp.config import COURSES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit call)
@@ -37,9 +30,11 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants & Navigation
 # ---------------------------------------------------------------------------
-_WEBAPP_PASSWORD: str = _secret("WEBAPP_PASSWORD")
+# Universal user name for audit logs
+if "user_name" not in st.session_state:
+    st.session_state["user_name"] = "Amro"
 
 # Page registry: display label → internal key
 _PAGES: dict[str, str] = {
@@ -53,63 +48,13 @@ _PAGES: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# Auth helpers
-# ---------------------------------------------------------------------------
-
-def _is_authenticated() -> bool:
-    return bool(st.session_state.get("authenticated", False))
-
-
-def _show_login_screen() -> None:
-    """Render the password + name gate.  On success, sets session state and reruns."""
-    col_l, col_c, col_r = st.columns([1, 2, 1])
-    with col_c:
-        st.title("📋 Attendance Manager")
-        st.write("")
-
-        if not _WEBAPP_PASSWORD:
-            st.error(
-                "⚠️ **WEBAPP_PASSWORD** is not set.  "
-                "Add it to `.streamlit/secrets.toml` or as an environment variable, "
-                "then restart the app."
-            )
-            return
-
-        with st.form("login_form", clear_on_submit=False):
-            st.subheader("Sign in")
-            name = st.text_input(
-                "Your name",
-                placeholder="e.g. Amro",
-                help="Stored in audit trails for review resolutions and sheet writes.",
-            )
-            pwd = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Sign in", use_container_width=True)
-
-        if submitted:
-            if pwd == _WEBAPP_PASSWORD:
-                st.session_state["authenticated"] = True
-                st.session_state["user_name"] = name.strip() or "webapp-user"
-                st.rerun()
-            else:
-                st.error("Incorrect password — try again.")
-
-
-# ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 
 def _render_sidebar() -> str:
     """Render the sidebar and return the selected internal page key."""
     with st.sidebar:
-        st.markdown("## 📋 Attendance")
-        user = st.session_state.get("user_name", "unknown")
-        st.caption(f"Signed in as **{user}**")
-
-        if st.button("Sign out", use_container_width=True, type="secondary"):
-            st.session_state.clear()
-            st.rerun()
-
-        st.divider()
+        st.markdown("## 📋 Attendance Manager")
 
         # Course selector — stored in session state for use by all page modules
         course_keys = list(COURSES.keys())
@@ -138,7 +83,7 @@ def _render_sidebar() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Page renderers (stubs — filled in W2-W7)
+# Page renderers
 # ---------------------------------------------------------------------------
 
 def _page_upload() -> None:
@@ -182,14 +127,10 @@ _PAGE_RENDERERS: dict[str, object] = {
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# Main entry point (Universal role, direct access)
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    if not _is_authenticated():
-        _show_login_screen()
-        return
-
     page_key = _render_sidebar()
     renderer = _PAGE_RENDERERS.get(page_key, _page_upload)
     renderer()  # type: ignore[operator]

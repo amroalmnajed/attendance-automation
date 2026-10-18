@@ -120,15 +120,23 @@ def generate_session_report(course: str, session: int, cfg: dict, review_store_d
             
     # 2. Review backlog
     pending_items = 0
-    if review_store_dir.exists():
-        for f in review_store_dir.glob("*.json"):
-            try:
-                with f.open("r", encoding="utf-8") as fh:
-                    data = json.load(fh)
-                    if data.get("course") == course and data.get("session") == session:
-                        pending_items += len([i for i in data.get("items", []) if i.get("status") == "pending"])
-            except Exception:
-                pass
+    try:
+        from attendance.review_queue import ReviewQueue
+        rq = ReviewQueue(store_dir=str(review_store_dir))
+        pending_items = len([
+            i for i in rq.list_pending()
+            if i.get("course") == course and str(i.get("session")) == str(session)
+        ])
+    except Exception:
+        if review_store_dir.exists():
+            for f in review_store_dir.glob("*.json"):
+                try:
+                    with f.open("r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                        if data.get("course") == course and data.get("session") == session:
+                            pending_items += len([i for i in data.get("items", []) if i.get("status") == "pending"])
+                except Exception:
+                    pass
 
     return {
         "course": course,

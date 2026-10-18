@@ -7,6 +7,7 @@ using resolver_ops.resolve_item.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import streamlit as st
 import yaml
@@ -59,16 +60,31 @@ def _page_review() -> None:
 
     st.subheader(f"{len(pending_items)} pending item(s)")
 
+    # Global dry-run toggle (default False so users don't have to turn it off on every card)
+    dry_run = st.toggle(
+        "Dry run (preview only - do not write to Google Sheet)",
+        value=st.session_state.get("review_global_dry_run", False),
+        key="review_global_dry_run",
+        help="When OFF (default), resolving an item writes directly to the Google Sheet. When ON, changes are previewed only.",
+    )
+
     # Render each item
     for idx, item in enumerate(pending_items, start=1):
         item_upload_id = item.get("upload_id", "")
         item_id = item.get("item_id", "")
 
         with st.expander(f"Item {idx}: {item.get('raw_name', '?')} (ID: {item_id[:8]}...)", expanded=(idx == 1)):
-            _render_review_item(item, item_upload_id, item_id, queue, cfg)
+            _render_review_item(item, item_upload_id, item_id, queue, cfg, dry_run=dry_run)
 
 
-def _render_review_item(item: dict, upload_id: str, item_id: str, queue: ReviewQueue, cfg: dict) -> None:
+def _render_review_item(
+    item: dict,
+    upload_id: str,
+    item_id: str,
+    queue: ReviewQueue,
+    cfg: dict,
+    dry_run: bool = False,
+) -> None:
     """Render a single review item with card, crop, and resolution buttons."""
     # Format the card (caption and button rows)
     total_items = len(queue.list_pending(upload_id))
@@ -78,31 +94,61 @@ def _render_review_item(item: dict, upload_id: str, item_id: str, queue: ReviewQ
     # Display caption as markdown
     st.markdown(caption)
 
-    # Display crop image if available
+    # Display crop image if available (with multi-path lookup and fallback)
     img_path = item.get("image_ref", "")
     bbox = item.get("bounding_box")
-    if img_path and os.path.exists(img_path):
-        crop_path = _crop_image(img_path, bbox)
-        try:
-            st.image(crop_path, caption="Flagged row (cropped)", use_container_width=True)
-        finally:
-            # Clean up temp crop file
-            if crop_path and crop_path != img_path:
-                try:
-                    os.remove(crop_path)
-                except OSError:
-                    pass
+    actual_img_path = None
+
+    if img_path:
+        cand_paths = [
+            Path(img_path),
+            Path("review_images") / Path(img_path).name,
+            Path("review_images") / img_path,
+        ]
+        for p in cand_paths:
+            if p.exists() and p.is_file():
+                actual_img_path = str(p.resolve())
+                break
+
+    if actual_img_path:
+        crop_bytes = None
+        crop_path = None
+        if bbox:
+            try:
+                crop_path = _crop_image(actual_img_path, bbox)
+                if crop_path and os.path.exists(crop_path):
+                    with open(crop_path, "rb") as fh:
+                        crop_bytes = fh.read()
+            except Exception:
+                crop_bytes = None
+            finally:
+                if crop_path and crop_path != actual_img_path:
+                    try:
+                        os.remove(crop_path)
+                    except OSError:
+                        pass
+
+        # Fallback to loading the original image if crop was unavailable or bbox missing
+        if not crop_bytes and os.path.exists(actual_img_path):
+            try:
+                with open(actual_img_path, "rb") as fh:
+                    crop_bytes = fh.read()
+            except Exception:
+                crop_bytes = None
+
+        if crop_bytes:
+            caption_text = "Flagged row (cropped)" if bbox else "Photo reference"
+            st.image(crop_bytes, caption=caption_text, use_container_width=True)
+        else:
+            st.info("Could not load image preview")
     else:
-        st.info("No image available for this item")
+        st.info("No image available for this item (e.g. pasted text or Zoom entry)")
 
     # Resolution buttons
     st.subheader("Resolve this item")
 
     # Get user name from session state for audit trail
     resolved_by = st.session_state.get("user_name", "webapp-user")
-
-    # Dry-run toggle for resolution
-    dry_run = st.toggle("Dry run (preview only)", value=True, key=f"dry_run_{item_id}")
 
     # Render candidate buttons from format_review_card
     for row in button_rows:
@@ -130,7 +176,7 @@ def _render_review_item(item: dict, upload_id: str, item_id: str, queue: ReviewQ
                         except ValueError:
                             pass
                 elif len(parts) >= 3 and parts[0] == "srch":
-                    if st.button("🔍 Search roster", key=f"search_{item_id}"):
+                    if st.button("🔍 Search roster", key=f"btn_search_{item_id}"):
                         st.session_state["search_upload_id"] = upload_id
                         st.session_state["search_item_id"] = item_id
                         st.rerun()
@@ -138,7 +184,7 @@ def _render_review_item(item: dict, upload_id: str, item_id: str, queue: ReviewQ
     # Search roster (if triggered)
     if st.session_state.get("search_upload_id") == upload_id and st.session_state.get("search_item_id") == item_id:
         st.subheader("🔍 Search Roster")
-        search_term = st.text_input("Type a few letters of the student's name", key=f"search_{item_id}")
+        search_term = st.text_input("Type a few letters of the student's name", key=f"input_search_{item_id}")
 
         if search_term:
             # Get session info to access roster
@@ -213,3 +259,7 @@ def _resolve_item_action(
                 st.error(f"❌ Resolution failed: {result.error}")
         except Exception as e:
             st.error(f"❌ Resolution error: {str(e)}")
+
+
+if __name__ == "__main__":
+    _page_review()

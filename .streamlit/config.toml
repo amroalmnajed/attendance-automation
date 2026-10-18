@@ -8,3 +8,7 @@ enableXsrfProtection = false
 gatherUsageStats = false
 serverAddress = "localhost"
 serverPort = 8501
+
+[client]
+showSidebarNavigation = false
+

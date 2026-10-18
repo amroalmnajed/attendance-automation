@@ -395,6 +395,7 @@ def run_zoom(
     config_path: str = "config/attendance.yaml",
     review_store_dir: str = "review_queue",
     manual_start_time: Optional[str | datetime] = None,
+    progress: Optional[ProgressFn] = None,
 ) -> RunSummary:
     """Execute the attendance pipeline for Zoom participant data.
 
@@ -416,6 +417,9 @@ def run_zoom(
 
     upload_id = f"zoom_{course}_{session_num}"
     log.info("pipeline_zoom_start", extra={"upload_id": upload_id, "source": source, "dry_run": dry_run})
+
+    if progress:
+        progress(STAGE_READING)
 
     summary = RunSummary(
         upload_id=upload_id,
@@ -447,10 +451,28 @@ def run_zoom(
         summary.errors.append(f"Failed to parse Zoom data: {e}")
         return summary
 
-    # Find teacher
-    teacher_name = zoom_cfg.get("teacher_name", "Yaman")
+    # Find teacher (support configured teacher names as well as fallbacks Amro & Yaman)
+    candidate_names: list[str] = []
+    cfg_teachers = zoom_cfg.get("teacher_names") or zoom_cfg.get("teacher_name")
+    if isinstance(cfg_teachers, list):
+        for t in cfg_teachers:
+            if isinstance(t, str) and t.strip():
+                candidate_names.append(t.strip())
+    elif isinstance(cfg_teachers, str) and cfg_teachers.strip():
+        candidate_names.append(cfg_teachers.strip())
+
+    for fallback_name in ["Amro", "Yaman"]:
+        if not any(c.lower() == fallback_name.lower() for c in candidate_names):
+            candidate_names.append(fallback_name)
+
     fuzzy_threshold = zoom_cfg.get("teacher_fuzzy_match_threshold", 80)
-    teacher = find_teacher(participants, teacher_name, fuzzy_threshold)
+    teacher = None
+    matched_teacher_name = candidate_names[0] if candidate_names else "Yaman"
+    for cand in candidate_names:
+        teacher = find_teacher(participants, cand, fuzzy_threshold)
+        if teacher is not None:
+            matched_teacher_name = cand
+            break
 
     meeting_start_time = None
     meeting_end_time = None
@@ -484,13 +506,13 @@ def run_zoom(
             summary.session_type_ambiguous = True
             log.warning("session_type_ambiguous", extra={"upload_id": upload_id})
 
-    # Calculate attendance
+    # Calculate attendance (exclude all candidate teachers so neither is treated as a student)
     attendance_results = calculate_attendance(
         participants=participants,
         config=zoom_cfg,
         meeting_start_time=meeting_start_time,
         meeting_end_time=meeting_end_time,
-        teacher_name=teacher_name,
+        teacher_name=candidate_names,
     )
 
     if attendance_results is None:
@@ -528,6 +550,7 @@ def run_zoom(
         image_path="zoom_source",
         review_store_dir=review_store_dir,
         summary=summary,
+        progress=progress,
         match_cfg_overrides=zoom_match_overrides,
     )
 

@@ -277,6 +277,8 @@ def find_teacher(
         score = max(
             fuzz.token_sort_ratio(p_name.lower(), teacher_name.lower()),
             fuzz.token_sort_ratio(p_clean, teacher_clean),
+            fuzz.token_set_ratio(p_name.lower(), teacher_name.lower()),
+            fuzz.token_set_ratio(p_clean, teacher_clean),
         )
         if score >= fuzzy_threshold:
             teacher_entries.append(p)
@@ -356,18 +358,25 @@ def calculate_attendance(
 
     effective_start = meeting_start_time + teacher_join_buffer
 
-    teacher_clean = clean_zoom_name(teacher_name).lower() if teacher_name else ""
-
     # Exclude teacher from student attendance (they were already used to establish meeting times)
     def _is_teacher(name: str) -> bool:
         if not teacher_name:
             return False
+        teacher_list = [teacher_name] if isinstance(teacher_name, str) else list(teacher_name)
         clean = clean_zoom_name(name).lower()
-        score = max(
-            fuzz.token_sort_ratio(name.lower(), teacher_name.lower()),
-            fuzz.token_sort_ratio(clean, teacher_clean),
-        )
-        return score >= fuzzy_threshold
+        for t in teacher_list:
+            if not t:
+                continue
+            t_clean = clean_zoom_name(t).lower()
+            score = max(
+                fuzz.token_sort_ratio(name.lower(), t.lower()),
+                fuzz.token_sort_ratio(clean, t_clean),
+                fuzz.token_set_ratio(name.lower(), t.lower()),
+                fuzz.token_set_ratio(clean, t_clean),
+            )
+            if score >= fuzzy_threshold:
+                return True
+        return False
 
     # Group by cleaned name (handle duplicates), skipping the teacher
     by_name: dict[str, list[dict[str, Any]]] = {}
