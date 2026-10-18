@@ -13,7 +13,7 @@ This guide explains how to deploy the Attendance Webapp to Streamlit Community C
 
 The webapp code is already structured for deployment. The main files are:
 - `webapp/app.py` - Streamlit entrypoint
-- `webapp/requirements.txt` - Dependencies (references root requirements.txt)
+- `webapp/requirements.txt` - Dependencies required when `webapp/app.py` is the entrypoint
 - `webapp/config.py` - Configuration (reads from st.secrets in cloud)
 - `webapp/pages/` - Page modules for each feature
 
@@ -83,7 +83,7 @@ Copy the output and paste it as the value for `GOOGLE_CREDENTIALS_B64` in Stream
 3. Select "From existing repo"
 4. Connect your GitHub account
 5. Select the repository
-6. Set the main file path to `webapp/app.py`
+6. Set the main file path to `webapp/app.py` (recommended; the root `app.py` also forwards here)
 7. Click "Deploy"
 
 ### Option B: Deploy from Local Directory
@@ -114,12 +114,14 @@ Streamlit Community Cloud free tier has:
 - No persistent disk storage
 - CPU time limits
 
-Our design respects these constraints:
-- ✅ No local state - all data lives in Google Sheets
-- ✅ Review queue uses SQLite (in-memory for cloud deployment)
-- ✅ Temp files for uploads are cleaned up after processing
-- ✅ No background processes
-- ✅ Memory-efficient operations
+The app itself runs within the free-tier resource limits, but Streamlit
+Community Cloud does **not** provide durable local storage. Google Sheets data
+is durable; the local review queue and uploaded review images are not. A restart
+or redeploy can therefore remove unresolved review items and their source images.
+
+For production use, either resolve reviews before restarting the app or add a
+durable backend (for example Google Cloud Storage plus a database) before relying
+on the Review Queue across restarts.
 
 ## Troubleshooting
 
@@ -153,7 +155,7 @@ Our design respects these constraints:
 
 ⚠️ **Important Security Considerations:**
 
-1. **Shared Password Model**: The current implementation uses a single shared password for all users. This is suitable for a single-teacher/small-team deployment but not for multi-tenant use.
+1. **Shared Password Model**: The app enforces one shared password from `WEBAPP_PASSWORD`. This is suitable for a single-teacher/small-team deployment but not for multi-tenant use.
 
 2. **No User Accounts**: There are no user accounts, roles, or permissions. Anyone with the password has full access to all courses and features.
 

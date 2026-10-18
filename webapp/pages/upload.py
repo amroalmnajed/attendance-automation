@@ -150,7 +150,8 @@ def _page_upload() -> None:
         return
 
     if st.button("Process", type="primary", use_container_width=True):
-        # Save uploaded files permanently in review_images so the review queue can always load them
+        # Keep files available to the review queue for the lifetime of this runtime.
+        # Community Cloud local storage is ephemeral; see webapp/DEPLOY.md.
         review_images_dir = Path("review_images")
         review_images_dir.mkdir(parents=True, exist_ok=True)
         image_paths = []

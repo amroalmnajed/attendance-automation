@@ -17,8 +17,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import streamlit as st  # noqa: E402 (must come after sys.path fixup)
 
-from webapp.config import COURSES  # noqa: E402
-
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit call)
 # ---------------------------------------------------------------------------
@@ -29,13 +27,16 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+from webapp.runtime import configure_runtime_secrets  # noqa: E402
+
+configure_runtime_secrets(st)
+
+from webapp.auth import require_login  # noqa: E402
+from webapp.config import COURSES  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants & Navigation
 # ---------------------------------------------------------------------------
-# Universal user name for audit logs
-if "user_name" not in st.session_state:
-    st.session_state["user_name"] = "Amro"
-
 # Page registry: display label → internal key
 _PAGES: dict[str, str] = {
     "📤 Upload Photos": "upload",
@@ -55,6 +56,10 @@ def _render_sidebar() -> str:
     """Render the sidebar and return the selected internal page key."""
     with st.sidebar:
         st.markdown("## 📋 Attendance Manager")
+        st.caption(f"Signed in as {st.session_state.get('user_name', 'webapp-user')}")
+        if st.button("Sign out", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
 
         # Course selector — stored in session state for use by all page modules
         course_keys = list(COURSES.keys())
@@ -131,9 +136,12 @@ _PAGE_RENDERERS: dict[str, object] = {
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    if not require_login():
+        return
     page_key = _render_sidebar()
     renderer = _PAGE_RENDERERS.get(page_key, _page_upload)
     renderer()  # type: ignore[operator]
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -149,9 +149,12 @@ This ensures consistency between the webapp, bot, and CLI.
 - ✅ W8: Progress feedback wiring (integrated in W2-W4)
 - ✅ W9: Auth & audit trail design (shared password + user name)
 
-**Pending:**
-- ⬜ W10: Deployment docs + secrets template (in progress)
-- ⬜ W11: Parity verification + delete dashboard/
+**Deployment note:**
+
+Streamlit Community Cloud has ephemeral local disk. Attendance writes are safe
+because they go to Google Sheets, but the local review queue and uploaded review
+images are lost after a restart or redeploy. Resolve them before restarting, or
+configure a durable storage backend before using the Review Queue operationally.
 
 ## Limitations
 
