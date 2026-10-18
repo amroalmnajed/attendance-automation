@@ -10,8 +10,7 @@ useDefaultConfig = true
 [[allowlist]]
 description = "Allow template files with placeholders"
 paths = [
-  '''dashboard/SECREDS_TEMPLATE\.toml''',
-  '''dashboard/DEPLOYMENT_CHECKLIST\.md''',
+  '''webapp/\.streamlit/secrets\.toml\.example''',
   '''\.env\.example''',
   '''\.env\.template''',
 ]

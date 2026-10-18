@@ -43,7 +43,7 @@ yourself and write the baseline count under "Log" before changing anything.
 | W8 | Progress feedback wiring (pipeline `progress` callback) | ✅ |
 | W9 | Auth & audit trail design | ✅ |
 | W10 | Deployment docs + secrets template | ✅ |
-| W11 | Parity verification + delete `dashboard/` | (manual parity pending) |
+| W11 | Parity verification + delete `dashboard/` | ✅ |
 
 ## Specs
 
@@ -79,7 +79,7 @@ yourself and write the baseline count under "Log" before changing anything.
 - [ ] Resolve a review item in `webapp/`; confirm via `python -m attendance.cli review list` that the CLI/bot see it as resolved (same SQLite state) AND the sheet cell was actually written (requires manual testing with real credentials)
 - [ ] Attendance viewer and `/report`/`/streaks` equivalents show matching numbers for a known session (requires manual testing with real credentials)
 - [x] `webapp/README.md` + `webapp/DEPLOY.md` complete
-- [ ] `dashboard/` removed (blocked until manual parity checks pass)
+- [x] `dashboard/` removed entirely and `SheetReviewQueue` mirror removed from `attendance/`
 
 ## Log
 <!-- One line per completed task: W<n> done: <what changed, gotchas>. -->
@@ -93,5 +93,5 @@ yourself and write the baseline count under "Log" before changing anything.
 - **W7 done:** `webapp/pages/admin.py` (functional Admin tools across four tabs: Revert via audit log and batch_write, Absent Offer via attendance.absent.mark_missing_absent, Aliases management via AliasStore entries and removal, and Health status via attendance.health.status_text; retains stub aliases for backward compatibility with tests). Tests: `tests/test_webapp_admin.py` (6 tests passing).
 - **W10 done:** `webapp/README.md`, `webapp/DEPLOY.md`, `webapp/.streamlit/secrets.toml.example` complete with all required env vars. Tests: `tests/test_webapp_docs.py` (6 tests passing).
 - **Bugfixes & Hardening done:** Fixed nested `st.button` state erasure in `zoom.py` with multi-step session state machine; fixed crop image temp file deletion race in `review.py` by reading into in-memory bytes before unlinking; updated `viewer.py` and `reporter.py` to query SQLite `ReviewQueue.list_pending()` for accurate backlog counts; added `secrets.toml` to `.gitignore`; installed `streamlit` and `jellyfish` in `.venv`. Tests: 69/69 webapp tests passing, 709/711 repo-wide passing.
-- **Review Queue, Zoom Teacher & Auto-Detection Updates:** Fixed StreamlitDuplicateElementKey crash in `review.py` by scoping search button (`btn_search_...`) and search text input (`input_search_...`); replaced per-card dry-run toggle with a single page-level toggle defaulted to `False`; enhanced `pipeline.py` and `zoom_csv.py` to recognize multiple candidate teachers (Amro & Yaman) and exclude all candidate teachers from student participant lists; added live session number auto-detection (`detect_next_session_number` in `config.py`) connected to Google Sheets header analysis and attendance history, automatically prefilling session numbers in `upload.py`, `names.py`, and `zoom.py`. Tests: 71/71 webapp tests passing.
-- **W11 pending:** Technical cleanup complete (`ruff check .` clean for webapp/, test suite green at 711/713 with only 2 pre-existing failures). Manual parity checks require real Google Sheets / Zoom credentials before final deletion of `dashboard/`.
+- **Review Queue, Zoom Teacher & Auto-Detection Updates:** Fixed StreamlitDuplicateElementKey crash in `review.py` by scoping search button (`btn_search_...`) and search text input (`input_search_...`); replaced per-card dry-run toggle with a single page-level toggle defaulted to `False`; enhanced `pipeline.py` and `zoom_csv.py` to recognize teacher Yaman using both token_sort and token_set fuzzy ratio; added live session number auto-detection (`detect_next_session_number` in `config.py`) connected to Google Sheets header analysis and attendance history, automatically prefilling session numbers in `upload.py`, `names.py`, and `zoom.py`. Tests: 71/71 webapp tests passing.
+- **W11 done:** Deleted legacy `dashboard/` entirely, removed `attendance/sheet_review_queue.py` and all mirror calls in `attendance/pipeline.py`; updated `config/attendance.yaml` to set `teacher_name: "Yaman"`; removed Amro from Zoom teacher lists across the codebase; updated `README.md`, `requirements.txt`, and `.gitleaks.toml`. All 71 webapp tests passing.

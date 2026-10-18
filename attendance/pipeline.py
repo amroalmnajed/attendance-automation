@@ -24,7 +24,6 @@ from attendance.ocr import OcrRow, build_provider
 from attendance.photos import merge_photo_rows
 from attendance.preprocess import prepare
 from attendance.review_queue import ReviewQueue
-from attendance.sheet_review_queue import SheetReviewQueue
 from attendance.session_resolver import SheetSession, resolve
 from attendance.writer import WriteCell, batch_write
 from attendance.zoom_api import fetch_past_meeting_participants
@@ -451,7 +450,7 @@ def run_zoom(
         summary.errors.append(f"Failed to parse Zoom data: {e}")
         return summary
 
-    # Find teacher (support configured teacher names as well as fallbacks Amro & Yaman)
+    # Find teacher (support configured teacher names with default fallback Yaman)
     candidate_names: list[str] = []
     cfg_teachers = zoom_cfg.get("teacher_names") or zoom_cfg.get("teacher_name")
     if isinstance(cfg_teachers, list):
@@ -461,9 +460,10 @@ def run_zoom(
     elif isinstance(cfg_teachers, str) and cfg_teachers.strip():
         candidate_names.append(cfg_teachers.strip())
 
-    for fallback_name in ["Amro", "Yaman"]:
-        if not any(c.lower() == fallback_name.lower() for c in candidate_names):
-            candidate_names.append(fallback_name)
+    if not candidate_names:
+        candidate_names.append("Yaman")
+    elif not any(c.lower() == "yaman" for c in candidate_names):
+        candidate_names.append("Yaman")
 
     fuzzy_threshold = zoom_cfg.get("teacher_fuzzy_match_threshold", 80)
     teacher = None
@@ -632,7 +632,6 @@ def _process_rows(
     )
     matcher.reset()
     review_queue = ReviewQueue(store_dir=review_store_dir)
-    sheet_review_queue = SheetReviewQueue(retry_cfg=att_cfg.get("write", {}).get("retry", {}))
 
     cells_to_write: list[WriteCell] = []
     matched_rows: set[int] = set()       # roster rows accepted from this upload
@@ -671,19 +670,6 @@ def _process_rows(
                 session_type=session_type,
                 reason=ReasonCode.PHOTO_MARK_CONFLICT,
             )
-            # Mirror to sheet for dashboard visibility
-            sheet_review_queue.enqueue(
-                upload_id=upload_id,
-                course=course,
-                session=session_num,
-                session_column=session_info.session_col,
-                session_type=session_type,
-                image_ref=ocr_row.source_image or image_path,
-                ocr_row=ocr_row,
-                match_result=match_result,
-                raw_mark=" / ".join(ocr_row.conflict_marks),
-                reason=ReasonCode.PHOTO_MARK_CONFLICT.value if isinstance(ReasonCode.PHOTO_MARK_CONFLICT, ReasonCode) else str(ReasonCode.PHOTO_MARK_CONFLICT),
-            )
             summary.flagged += 1
             continue
 
@@ -698,19 +684,6 @@ def _process_rows(
                 match_result=match_result,
                 raw_mark=ocr_row.status_mark,
                 session_type=session_type,
-            )
-            # Mirror to sheet for dashboard visibility
-            sheet_review_queue.enqueue(
-                upload_id=upload_id,
-                course=course,
-                session=session_num,
-                session_column=session_info.session_col,
-                session_type=session_type,
-                image_ref=ocr_row.source_image or image_path,
-                ocr_row=ocr_row,
-                match_result=match_result,
-                raw_mark=ocr_row.status_mark,
-                reason=match_result.reason.value if isinstance(match_result.reason, ReasonCode) else str(match_result.reason),
             )
             summary.flagged += 1
             continue
@@ -744,19 +717,6 @@ def _process_rows(
                 raw_mark=raw_mark,
                 session_type=session_type,
                 reason=gate.reason,
-            )
-            # Mirror to sheet for dashboard visibility
-            sheet_review_queue.enqueue(
-                upload_id=upload_id,
-                course=course,
-                session=session_num,
-                session_column=session_info.session_col,
-                session_type=session_type,
-                image_ref=ocr_row.source_image or image_path,
-                ocr_row=ocr_row,
-                match_result=match_result,
-                raw_mark=raw_mark,
-                reason=gate.reason.value if isinstance(gate.reason, ReasonCode) else str(gate.reason),
             )
             summary.flagged += 1
             continue

@@ -1,6 +1,6 @@
 """webapp/config.py — Course and secret configuration for the webapp.
 
-Ported from dashboard/config.py's CourseConfig / _secret() / COURSES pattern.
+CourseConfig / _secret() / COURSES pattern for webapp configuration.
 Reads course keys and display names from config/attendance.yaml (ground truth)
 instead of hard-coding them, so the webapp never drifts from the pipeline config.
 Falls back to the known course keys (crash/main/g9/g10) when the YAML is absent

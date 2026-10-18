@@ -186,7 +186,7 @@ attendance:
       "83570905451": g10
       "81887392957": crash
       "82572049402": g9
-    teacher_name: "Amro"
+    teacher_name: "Yaman"
     teacher_fuzzy_match_threshold: 80
     teacher_join_buffer_minutes: 5
     late_threshold_minutes: 15

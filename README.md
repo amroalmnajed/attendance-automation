@@ -12,7 +12,7 @@ The project has three interfaces:
 2. **CLI** - Command-line tools for processing and review
 3. **Web app** - Browser-based interface (see `webapp/README.md`)
 
-**Note:** The web app (`webapp/`) is the primary interface intended to replace the bot. The dashboard (`dashboard/`) is a legacy viewer that reads sheets directly and will be removed once webapp reaches full parity.
+**Note:** The web app (`webapp/`) is the primary interface for paper attendance processing, Zoom ingestion, review queue resolution, and attendance reporting.
 
 ## Run
 
