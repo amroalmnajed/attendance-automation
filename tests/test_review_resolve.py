@@ -3,7 +3,7 @@
 All imports inside cmd_review_resolve are local (not at module level), so we patch
 the source modules they come from:
   - attendance.writer.batch_write
-  - attendance.session_resolver.resolve  (would connect to Google Sheets)
+  - attendance.resolver_ops.session_resolve  (resolver_ops does `from attendance.session_resolver import resolve as session_resolve`, so we must patch the name in resolver_ops' namespace, not in session_resolver)
   - attendance.review_queue.ReviewQueue  (to inject tmp-dir queue instance)
   - attendance.aliases.AliasStore        (to redirect alias file to tmp dir)
 """
@@ -111,7 +111,7 @@ def test_review_resolve_writes_sheet_before_marking_resolved():
             return result
 
         with patch("attendance.writer.batch_write", side_effect=mock_batch_write), \
-             patch("attendance.session_resolver.resolve", return_value=_make_fake_session()), \
+             patch("attendance.resolver_ops.session_resolve", return_value=_make_fake_session()), \
              patch("attendance.review_queue.ReviewQueue", return_value=rq):
 
             from attendance.cli import cmd_review_resolve
@@ -146,7 +146,7 @@ def test_review_resolve_dry_run_does_not_resolve():
             return result
 
         with patch("attendance.writer.batch_write", side_effect=mock_batch_write), \
-             patch("attendance.session_resolver.resolve", return_value=_make_fake_session()), \
+             patch("attendance.resolver_ops.session_resolve", return_value=_make_fake_session()), \
              patch("attendance.review_queue.ReviewQueue", return_value=rq):
 
             from attendance.cli import cmd_review_resolve
@@ -172,7 +172,7 @@ def test_review_resolve_fails_if_write_fails():
             raise RuntimeError("Sheet write failed")
 
         with patch("attendance.writer.batch_write", side_effect=mock_batch_write), \
-             patch("attendance.session_resolver.resolve", return_value=_make_fake_session()), \
+             patch("attendance.resolver_ops.session_resolve", return_value=_make_fake_session()), \
              patch("attendance.review_queue.ReviewQueue", return_value=rq):
 
             from attendance.cli import cmd_review_resolve
@@ -208,7 +208,7 @@ def test_review_resolve_learns_alias_after_successful_write():
             return AliasStore(path=alias_path, min_confirmations=int(min_confirmations))
 
         with patch("attendance.writer.batch_write", side_effect=mock_batch_write), \
-             patch("attendance.session_resolver.resolve", return_value=_make_fake_session()), \
+             patch("attendance.resolver_ops.session_resolve", return_value=_make_fake_session()), \
              patch("attendance.review_queue.ReviewQueue", return_value=rq), \
              patch("attendance.aliases.AliasStore", side_effect=make_alias_store):
 

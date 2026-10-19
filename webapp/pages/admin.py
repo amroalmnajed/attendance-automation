@@ -9,6 +9,7 @@ from pathlib import Path
 import streamlit as st
 import yaml
 
+from attendance.config_runtime import _user_error_message
 from attendance.session_resolver import resolve as session_resolve
 from attendance.writer import WriteCell, batch_write
 from webapp.config import CONFIG_PATH, COURSES
@@ -150,7 +151,7 @@ def _render_revert() -> None:
                 else:
                     st.success(f"✅ Reverted {len(cells_to_write)} cell(s) successfully.")
             except Exception as exc:
-                st.error(f"Revert failed: {str(exc)}")
+                st.error(_user_error_message(exc, what="revert"))
 
 
 def _render_absent_offer() -> None:

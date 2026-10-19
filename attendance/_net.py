@@ -5,7 +5,6 @@ network calls share one definition of "worth retrying" and one backoff policy.
 """
 from __future__ import annotations
 
-import random
 import time
 from typing import Any, Callable, Optional, TypeVar
 

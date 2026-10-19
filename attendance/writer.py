@@ -11,7 +11,7 @@ Safety contract:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 
 from attendance import health

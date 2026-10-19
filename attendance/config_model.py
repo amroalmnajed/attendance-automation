@@ -4,7 +4,7 @@ Provides structured Pydantic v2 validation replacing manual checks in config_che
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 

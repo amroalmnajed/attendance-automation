@@ -453,7 +453,9 @@ def extract_meeting_id_from_filename(filename: str) -> Optional[str]:
     Returns:
         Meeting ID string or None if pattern doesn't match
     """
-    base_name = Path(filename).name
+    # Use re.split so Windows-style paths (C:\Users\...) are stripped on Linux too,
+    # where pathlib.Path only splits on '/' and would leave the backslash path intact.
+    base_name = re.split(r"[\\/]", filename)[-1]
     pattern = r"^participants_(\d+)_\d{4}_\d{2}_\d{2}(?:\s*\(\d+\))?\.csv$"
     match = re.match(pattern, base_name, re.IGNORECASE)
     if match:
@@ -473,7 +475,7 @@ def extract_date_from_filename(filename: str) -> Optional[datetime]:
     Returns:
         datetime object or None if pattern doesn't match
     """
-    base_name = Path(filename).name
+    base_name = re.split(r"[\\/]", filename)[-1]
     pattern = r"^participants_\d+_(\d{4}_\d{2}_\d{2})(?:\s*\(\d+\))?\.csv$"
     match = re.match(pattern, base_name, re.IGNORECASE)
     if match:

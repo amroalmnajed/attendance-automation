@@ -10,6 +10,7 @@ from pathlib import Path
 import streamlit as st
 import yaml
 
+from attendance.config_runtime import _user_error_message
 from attendance.history import count_marks, entries
 from attendance.reporter import generate_session_report, generate_streaks_report
 from attendance.review_queue import ReviewQueue
@@ -88,7 +89,7 @@ def _render_session_viewer(course_key: str, course_label: str, cfg: dict, review
             cfg=cfg,
         )
     except Exception as e:
-        st.error(f"Failed to load session: {str(e)}")
+        st.error(_user_error_message(e, what="session"))
         return
 
     # Display attendance table
@@ -199,7 +200,7 @@ def _render_session_report(course_key: str, course_label: str, cfg: dict, review
                     st.success("No absentees for this session")
 
             except Exception as e:
-                st.error(f"Failed to generate report: {str(e)}")
+                st.error(_user_error_message(e, what="report"))
 
 
 def _render_streaks_report(course_key: str, course_label: str, cfg: dict) -> None:
@@ -229,7 +230,7 @@ def _render_streaks_report(course_key: str, course_label: str, cfg: dict) -> Non
                     st.success(f"No students with {consecutive_absences}+ consecutive absences")
 
             except Exception as e:
-                st.error(f"Failed to generate streaks report: {str(e)}")
+                st.error(_user_error_message(e, what="streaks report"))
 
 
 if __name__ == "__main__":
