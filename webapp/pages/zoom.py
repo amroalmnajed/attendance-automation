@@ -115,11 +115,11 @@ def _page_zoom() -> None:
         st.caption(f"Auto-detected next: **Session {default_session}**")
         session_type = None
 
-    # Dry-run toggle (default ON per Rule 7)
+    # Dry-run toggle (default OFF: uploads write unless explicitly previewed)
     dry_run = st.toggle(
         "Dry run (preview only)",
-        value=True,
-        help="When ON, changes are previewed but NOT written to the sheet. Turn OFF to write for real.",
+        value=False,
+        help="When ON, changes are previewed but NOT written to the sheet.",
     )
 
     st.divider()

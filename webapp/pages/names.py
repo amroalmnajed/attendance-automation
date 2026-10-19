@@ -102,11 +102,11 @@ def _page_names() -> None:
         help="Paste your list here. One line per student. Use | to separate name from mark.",
     )
 
-    # Dry-run toggle (default ON per Rule 7)
+    # Dry-run toggle (default OFF: uploads write unless explicitly previewed)
     dry_run = st.toggle(
         "Dry run (preview only)",
-        value=True,
-        help="When ON, changes are previewed but NOT written to the sheet. Turn OFF to write for real.",
+        value=False,
+        help="When ON, changes are previewed but NOT written to the sheet.",
     )
 
     if not names_text:

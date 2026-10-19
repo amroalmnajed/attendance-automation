@@ -1238,7 +1238,7 @@ def main() -> None:
     )
     p_proc.add_argument("--session", required=True, type=int, help="Session number (1-based)")
     p_proc.add_argument("--type", default=None, dest="type", help="Session type (required for g9/g10)")
-    p_proc.add_argument("--dry-run", action="store_true", default=True, help="Dry-run (no writes)")
+    p_proc.add_argument("--dry-run", action="store_true", default=False, help="Dry-run (no writes)")
     p_proc.add_argument("--no-dry-run", dest="dry_run", action="store_false", help="Actually write")
     p_proc.add_argument("--force", action="store_true", default=False, help="Overwrite non-empty cells")
     p_proc.set_defaults(func=cmd_process)
@@ -1249,7 +1249,7 @@ def main() -> None:
     p_proc_txt.add_argument("--course", choices=["crash", "main", "g10", "g9"], help="Target course key (prompts if missing)")
     p_proc_txt.add_argument("--session", type=int, help="Session number (prompts if missing)")
     p_proc_txt.add_argument("--type", default=None, dest="type", help="Session type (prompts if missing)")
-    p_proc_txt.add_argument("--dry-run", action="store_true", default=True, help="Dry-run (no writes)")
+    p_proc_txt.add_argument("--dry-run", action="store_true", default=False, help="Dry-run (no writes)")
     p_proc_txt.add_argument("--no-dry-run", dest="dry_run", action="store_false", help="Actually write")
     p_proc_txt.add_argument("--force", action="store_true", default=False, help="Overwrite non-empty cells")
     p_proc_txt.add_argument("--yes", "-y", action="store_true", default=False,
