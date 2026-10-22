@@ -109,8 +109,9 @@ attendance:
     timeout_s: 60                   # per-request Gemini HTTP timeout
     max_attempts: 3                 # same-model retries for timeouts/5xx (429 → next model)
     second_provider: null           # e.g. mock for testing independent-error second pass
-    fallback_to_tesseract: false
+    fallback_to_tesseract: true
     tesseract_lang: eng
+    tesseract_cmd: C:\Program Files\Tesseract-OCR\tesseract.exe
     # Feature 9: what the 2nd pass reads. Only used when passes: 2 (passes: 1 = single read, always).
     #   full           = every row is read twice and merged (the original behaviour, default)
     #   low_confidence = read everything once; re-read ONLY when some rows are below min_confidence
