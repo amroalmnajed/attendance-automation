@@ -15,6 +15,7 @@ google-genai>=1.0.0
 # Image processing
 opencv-python-headless>=4.8.0
 Pillow>=10.0.0
+pytesseract>=0.3.10
 
 # Name matching
 rapidfuzz>=3.0.0
