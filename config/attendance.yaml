@@ -109,7 +109,7 @@ attendance:
     timeout_s: 60                   # per-request Gemini HTTP timeout
     max_attempts: 3                 # same-model retries for timeouts/5xx (429 → next model)
     second_provider: null           # e.g. mock for testing independent-error second pass
-    fallback_to_tesseract: true
+    fallback_to_tesseract: false
     tesseract_lang: eng
     # Feature 9: what the 2nd pass reads. Only used when passes: 2 (passes: 1 = single read, always).
     #   full           = every row is read twice and merged (the original behaviour, default)
