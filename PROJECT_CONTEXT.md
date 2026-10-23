@@ -1,13 +1,14 @@
 # Project Overview & Tech Stack
 - **Purpose**: Automates attendance tracking by extracting student names from photos of paper attendance sheets via OCR, matching them against roster names, and writing attendance records to Google Sheets.
 - **Tech Stack**: Python 3.x.
-- **Key Dependencies**: `gspread` (Google Sheets API), `google-genai` (Gemini API for OCR), `PyYAML` (Configuration).
+- **Key Dependencies**: `gspread` (Google Sheets API), `openai` (Free.ai GOT-OCR 2.0 — primary OCR), `google-genai` (Gemini API — fallback OCR), `PyYAML` (Configuration).
+- **OCR Strategy**: Free.ai GOT-OCR 2.0 is the primary provider (optimised for Arabic handwriting). Gemini is the secondary fallback (triggered when free.ai hits its daily 6,000 token limit). Tesseract has been fully removed.
 
 # Directory & Component Map
 - `attendance/`: Core domain logic.
   - `cli.py`: Command-line interface entry points.
   - `pipeline.py`: Orchestrates the main flow (OCR -> Normalize -> Match -> Write).
-  - `ocr.py`: Interfaces with OCR providers (e.g., Gemini) to extract names and marks.
+  - `ocr.py`: Interfaces with OCR providers (`FreeAIProvider`, `GeminiProvider`, `MockProvider`) to extract names and marks.
   - `matcher.py`: Fuzzy matching logic comparing OCR names to canonical roster names.
   - `writer.py`: Handles Google Sheets API writes and batching.
   - `session_resolver.py`: Resolves course, session, and column metadata from Sheets.
@@ -23,7 +24,7 @@
 # Data Flow & Architecture
 1. **Input**: Image path, course, session provided via CLI.
 2. **Setup**: `session_resolver` pulls the current roster from Google Sheets.
-3. **Extraction**: `ocr` extracts `(raw_name, status_mark)` pairs from the image.
+3. **Extraction**: `ocr` extracts `(raw_name, status_mark)` pairs from the image (FreeAI primary, Gemini fallback).
 4. **Normalization & Matching**: `normalizer` cleans strings; `matcher` fuzzy-matches them to the roster.
 5. **Writing**: Exact/high-confidence matches are written via `writer`. Low-confidence matches go to `review_queue`.
 6. **Review**: Humans resolve flagged items via `cli review resolve`, which completes the write and learns the alias.
@@ -34,7 +35,8 @@
 - **Dry-run by default**: Critical operations default to dry-run mode to prevent accidental Sheet modifications.
 
 # Environment & Configuration
-- **Env Vars Required**: `GOOGLE_APPLICATION_CREDENTIALS` (Service Account JSON), `OPS_SHEET_ID`, `CRASH_SHEET_ID`, `MAIN_SHEET_ID`, `G10_SHEET_ID`, `G9_SHEET_ID`, `GEMINI_API_KEY`.
+- **Env Vars Required**: `GOOGLE_APPLICATION_CREDENTIALS` (Service Account JSON), `FREEAI_API_KEY` (primary OCR), `CRASH_SHEET_ID`, `MAIN_SHEET_ID`, `G10_SHEET_ID`, `G9_SHEET_ID`.
+- **Env Vars Optional**: `GEMINI_API_KEY` (fallback OCR — needed when `fallback_to_gemini: true`), `OPS_SHEET_ID`.
 - **Setup**: `pip install -r requirements.txt`.
 
 # Phase 4 additions (see CHANGELOG.md for config keys)

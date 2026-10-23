@@ -50,7 +50,5 @@ def test_secrets_example_is_readable():
     assert len(content) > 0
     assert "WEBAPP_PASSWORD" in content
     assert "GOOGLE_CREDENTIALS_B64" in content
+    assert "FREEAI_API_KEY" in content
     assert "GEMINI_API_KEY" in content
-
-
-

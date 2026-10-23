@@ -108,9 +108,33 @@ def find_secret_issues(
                     "message": f"Mirror sheet ID env var {mirror_var} has a placeholder value.",
                 })
 
-    # 3. Gemini API key (if provider is gemini)
+    # 3. OCR API keys (FreeAI primary, Gemini fallback)
     ocr_cfg = att_cfg.get("ocr", {}) or {}
-    if ocr_cfg.get("provider", "gemini") == "gemini":
+    provider = ocr_cfg.get("provider", "freeai")
+
+    if provider == "freeai":
+        freeai_key_var = ocr_cfg.get("freeai_api_key_env", "FREEAI_API_KEY")
+        freeai_val = env_map.get(freeai_key_var)
+        if freeai_key_var not in env_map:
+            issues.append({
+                "var": freeai_key_var,
+                "issue": "missing",
+                "message": f"Required secret {freeai_key_var} is not set.",
+            })
+        elif freeai_val is None or not str(freeai_val).strip():
+            issues.append({
+                "var": freeai_key_var,
+                "issue": "empty",
+                "message": f"Required secret {freeai_key_var} is empty.",
+            })
+        elif is_placeholder(str(freeai_val)):
+            issues.append({
+                "var": freeai_key_var,
+                "issue": "placeholder",
+                "message": f"Required secret {freeai_key_var} contains a placeholder value.",
+            })
+
+    if provider == "gemini":
         gemini_val = env_map.get("GEMINI_API_KEY")
         if "GEMINI_API_KEY" not in env_map:
             issues.append({
@@ -130,6 +154,22 @@ def find_secret_issues(
                 "issue": "placeholder",
                 "message": "Required secret GEMINI_API_KEY contains a placeholder value.",
             })
+    elif provider == "freeai" and ocr_cfg.get("fallback_to_gemini", True):
+        # Validate GEMINI_API_KEY if configured for fallback
+        if "GEMINI_API_KEY" in env_map:
+            gemini_val = env_map.get("GEMINI_API_KEY")
+            if gemini_val is None or not str(gemini_val).strip():
+                issues.append({
+                    "var": "GEMINI_API_KEY",
+                    "issue": "empty",
+                    "message": "Fallback secret GEMINI_API_KEY is empty.",
+                })
+            elif is_placeholder(str(gemini_val)):
+                issues.append({
+                    "var": "GEMINI_API_KEY",
+                    "issue": "placeholder",
+                    "message": "Fallback secret GEMINI_API_KEY contains a placeholder value.",
+                })
 
     # 4. Google Application Credentials
     core_auth = (cfg.get("core", {}) or {}).get("auth", {}) or {}

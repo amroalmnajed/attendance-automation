@@ -46,7 +46,12 @@ G9_SHEET_ID    = "your-g9-sheet-id"
 G10_SHEET_ID   = "your-g10-sheet-id"
 
 # --------------------------------------------------------------------------
-# Gemini API key (required by attendance/ocr.py)
+# Free.ai API key (primary OCR provider — GOT-OCR 2.0)
+# --------------------------------------------------------------------------
+FREEAI_API_KEY = "your-freeai-api-key"
+
+# --------------------------------------------------------------------------
+# Gemini API key (fallback OCR provider)
 # --------------------------------------------------------------------------
 GEMINI_API_KEY = "your-gemini-api-key"
 

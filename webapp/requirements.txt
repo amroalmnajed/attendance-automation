@@ -5,17 +5,19 @@
 
 streamlit>=1.37
 
-# Google APIs (Sheets + Gemini OCR)
+# OCR & AI APIs
+openai>=1.0.0
+google-genai>=1.0.0
+
+# Google APIs (Sheets)
 google-auth>=2.20.0
 google-auth-oauthlib>=1.0.0
 google-api-python-client>=2.90.0
 gspread>=6.0.0
-google-genai>=1.0.0
 
 # Image processing
 opencv-python-headless>=4.8.0
 Pillow>=10.0.0
-pytesseract>=0.3.10
 
 # Name matching
 rapidfuzz>=3.0.0

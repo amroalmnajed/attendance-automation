@@ -103,15 +103,14 @@ attendance:
     block_when_pending_review: true # tap is refused while this upload still has review items
 
   ocr:
-    provider: gemini                # gemini | mock
-    model: gemini-3.5-flash         # Downgraded to 3.5 to bypass 429 quota exhaustion on 3.8
+    provider: freeai                # freeai | gemini | mock
+    model: got-ocr2                 # free.ai GOT-OCR 2.0 model (optimized for Arabic)
+    freeai_api_key_env: FREEAI_API_KEY
+    fallback_to_gemini: true        # fall back to Gemini when free.ai hits daily token limit
     passes: 2
-    timeout_s: 60                   # per-request Gemini HTTP timeout
-    max_attempts: 3                 # same-model retries for timeouts/5xx (429 → next model)
+    timeout_s: 60                   # per-request HTTP timeout
+    max_attempts: 3                 # retries for timeouts/5xx
     second_provider: null           # e.g. mock for testing independent-error second pass
-    fallback_to_tesseract: true
-    tesseract_lang: eng
-    # tesseract_cmd: /usr/bin/tesseract  # Optional: override if not on PATH
     # Feature 9: what the 2nd pass reads. Only used when passes: 2 (passes: 1 = single read, always).
     #   full           = every row is read twice and merged (the original behaviour, default)
     #   low_confidence = read everything once; re-read ONLY when some rows are below min_confidence

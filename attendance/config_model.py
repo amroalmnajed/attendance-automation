@@ -120,6 +120,8 @@ class SecondPassConfig(BaseConfigModel):
 class OcrConfig(BaseConfigModel):
     provider: Optional[str] = "gemini"
     model: Optional[str] = "gemini-3.5-flash"
+    freeai_api_key_env: Optional[str] = "FREEAI_API_KEY"
+    fallback_to_gemini: Optional[bool] = True
     passes: Optional[int] = 2
     timeout_s: Optional[int] = 60
     max_attempts: Optional[int] = 3

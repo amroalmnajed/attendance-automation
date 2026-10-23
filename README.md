@@ -2,7 +2,7 @@
 
 Streamlit web app and CLI that turn a photo of a paper attendance sheet into attendance marks in Google Sheets.
 
-Photo -> OpenCV clean-up -> Gemini OCR -> fuzzy match against the roster -> Google Sheets.
+Photo -> OpenCV clean-up -> Free.ai GOT-OCR 2.0 (Gemini fallback) -> fuzzy match against the roster -> Google Sheets.
 Uncertain matches go to a review queue that an admin resolves from the web app or the CLI.
 
 ## Interfaces
@@ -15,7 +15,8 @@ Uncertain matches go to a review queue that an admin resolves from the web app o
 ### Web App (Primary Interface)
 
 1. Python 3.12 (see `.python-version`), then `pip install -r requirements.txt`.
-2. Copy `.env.example` to `.env` and fill in your actual values (`GEMINI_API_KEY`,
+2. Copy `.env.example` to `.env` and fill in your actual values (`FREEAI_API_KEY`,
+   `GEMINI_API_KEY` (fallback),
    the `*_SHEET_ID` values and Google credentials (`GOOGLE_APPLICATION_CREDENTIALS`, or
    `GOOGLE_CREDENTIALS_B64` on Railway)).
 3. Edit `config/attendance.yaml` (courses, thresholds, `dry_run_default`,

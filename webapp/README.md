@@ -24,7 +24,8 @@ Edit `webapp/.streamlit/secrets.toml`:
 - `WEBAPP_PASSWORD`: Password for the webapp (required)
 - `GOOGLE_CREDENTIALS_B64`: Base64-encoded service account JSON
 - `CRASH_SHEET_ID`, `MAIN_SHEET_ID`, `G9_SHEET_ID`, `G10_SHEET_ID`: Your Google Sheet IDs
-- `GEMINI_API_KEY`: Gemini API key for OCR
+- `FREEAI_API_KEY`: Free.ai API key for primary OCR (GOT-OCR 2.0)
+- `GEMINI_API_KEY`: Gemini API key (fallback OCR)
 - `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`: Zoom API credentials (optional, for Zoom ingestion)
 
 ### 3. Verify Configuration

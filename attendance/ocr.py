@@ -1,12 +1,13 @@
-"""attendance/ocr.py — OCR provider interface + Gemini Flash implementation.
+"""attendance/ocr.py — OCR provider interface + FreeAI / Gemini implementations.
 
 The OcrProvider Protocol lets you swap providers via one config line.
-Both GeminiProvider and TesseractProvider (attendance/ocr_tesseract.py)
-satisfy it; any object with a compatible ``read`` method also satisfies it
-structurally (no inheritance required).
+Both FreeAIProvider and GeminiProvider satisfy it; any object with a
+compatible ``read`` method also satisfies it structurally (no inheritance
+required).
 
-The GeminiProvider sends the preprocessed image to Gemini with a strict
-JSON-schema prompt and returns:
+FreeAIProvider uses the free.ai GOT-OCR 2.0 model (OpenAI-compatible API),
+optimised for Arabic handwriting.  GeminiProvider sends the preprocessed
+image to Gemini with a strict JSON-schema prompt.  Both return:
   [{raw_name: str, status_mark: str | null, confidence: float}]
 """
 from __future__ import annotations
@@ -27,7 +28,7 @@ log = get_logger("ocr")
 
 
 class OcrUnavailableError(RuntimeError):
-    """Gemini could not produce a usable response (quota, outage, timeout, empty reply)."""
+    """Provider could not produce a usable response (quota, outage, timeout, empty reply)."""
 
 
 # ─── Data model ───────────────────────────────────────────────────────────────
@@ -54,8 +55,8 @@ class OcrProvider(Protocol):
     """Structural protocol for OCR providers.
 
     Any class with a compatible ``read`` method satisfies this protocol
-    without needing to subclass it.  Both ``GeminiProvider`` and
-    ``TesseractProvider`` implement it.
+    without needing to subclass it.  Both ``FreeAIProvider`` and
+    ``GeminiProvider`` implement it.
 
     Parameters passed to ``read``:
         image_bytes  – raw bytes of the preprocessed attendance-sheet photo.
@@ -72,7 +73,7 @@ class OcrProvider(Protocol):
         ...
 
 
-# ─── Gemini provider ─────────────────────────────────────────────────────────
+# ─── Shared prompt & parser ──────────────────────────────────────────────────
 
 _GEMINI_PROMPT = """\
 You are an expert OCR system reading a handwritten attendance sheet photo for an IGCSE tutoring center in Egypt.
@@ -145,6 +146,216 @@ def _build_prompt(roster: Optional[list[str]]) -> str:
         roster_count=len(roster), roster_block=roster_block
     )
 
+
+def _detect_mime(image_bytes: bytes) -> str:
+    """Detect MIME type from magic bytes."""
+    if image_bytes[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if image_bytes[:4] in (b"RIFF", b"WEBP"):
+        return "image/webp"
+    return "image/jpeg"  # safe default
+
+
+def _parse_gemini_response(raw: str) -> list[OcrRow]:
+    """Parse the JSON array from an LLM's response text (shared by FreeAI & Gemini)."""
+    # Strip markdown fences if present (model sometimes ignores the instruction)
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
+    cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+
+    try:
+        items = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        log.error("ocr_json_parse_error", extra={"error": str(exc), "raw": raw[:500]})
+        # Return a single unreadable row rather than crashing the pipeline
+        return [OcrRow(raw_name="[UNREADABLE]", status_mark=None, confidence=0.0, row_index=1)]
+
+    if not isinstance(items, list):
+        log.error("ocr_json_not_list", extra={"type": type(items).__name__, "raw": raw[:500]})
+        return [OcrRow(raw_name="[UNREADABLE]", status_mark=None, confidence=0.0, row_index=1)]
+
+    rows: list[OcrRow] = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        raw_name = str(item.get("raw_name", "")).strip()
+        if not raw_name:
+            continue
+        mark = item.get("status_mark")
+        if mark is not None:
+            mark = str(mark).strip() or None
+        try:
+            conf = float(item.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            conf = 0.0  # unparseable confidence → force human review
+        try:
+            row_idx = int(item.get("row_index", i + 1))
+        except (TypeError, ValueError):
+            row_idx = i + 1
+        bounding_box = item.get("bounding_box")
+
+        matched_roster_name = item.get("matched_roster_name")
+        if matched_roster_name is not None:
+            matched_roster_name = str(matched_roster_name).strip() or None
+        if matched_roster_name is not None:
+            # match_confidence (how sure it is of the student) overrides the plain
+            # OCR confidence (how sure it is of the handwriting) once a roster match
+            # is offered — that's the number the matcher actually cares about.
+            match_conf = item.get("match_confidence")
+            if match_conf is not None:
+                try:
+                    conf = min(max(float(match_conf), 0.0), 1.0)
+                except (TypeError, ValueError):
+                    pass
+
+        rows.append(OcrRow(
+            raw_name=raw_name,
+            status_mark=mark,
+            confidence=min(max(conf, 0.0), 1.0),
+            row_index=row_idx,
+            bounding_box=bounding_box,
+            matched_roster_name=matched_roster_name,
+        ))
+
+    log.info("ocr_parse_done", extra={"rows_parsed": len(rows)})
+    return rows
+
+
+# ─── FreeAI provider (GOT-OCR 2.0, primary) ─────────────────────────────────
+
+_TOKEN_LIMIT_KEYWORDS = ("token", "limit", "quota", "rate", "exceeded", "exhausted")
+
+
+class FreeAIProvider(OcrProvider):
+    """OCR via free.ai GOT-OCR 2.0 (OpenAI-compatible API, optimised for Arabic)."""
+
+    def __init__(
+        self,
+        model: str = "got-ocr2",
+        min_confidence: float = 0.75,
+        timeout_s: float = 60.0,
+        max_attempts: int = 3,
+        base_s: float = 2.0,
+        cap_s: float = 16.0,
+        api_key_env: str = "FREEAI_API_KEY",
+    ):
+        self.model_name = model
+        self.min_confidence = min_confidence
+        self.timeout_s = timeout_s
+        self.max_attempts = max_attempts
+        self.base_s = base_s
+        self.cap_s = cap_s
+        self.api_key_env = api_key_env
+        self._client = None  # lazy init
+
+    def _get_client(self):
+        if self._client is None:
+            try:
+                import openai
+            except ImportError:
+                raise ImportError(
+                    "openai package not installed. Run: pip install openai"
+                )
+            api_key = os.environ.get(self.api_key_env, "")
+            if not api_key:
+                raise ValueError(
+                    f"{self.api_key_env} env var is not set. "
+                    "Get a key from https://www.free.ai/"
+                )
+            self._client = openai.OpenAI(
+                api_key=api_key,
+                base_url="https://api.free.ai/v1/",
+                timeout=self.timeout_s,
+            )
+        return self._client
+
+    @staticmethod
+    def _is_token_limit(exc: BaseException) -> bool:
+        """True if the error signals daily token / rate limit exhaustion."""
+        msg = str(exc).lower()
+        status = http_status(exc)
+        if status == 429:
+            return True
+        return sum(1 for kw in _TOKEN_LIMIT_KEYWORDS if kw in msg) >= 2
+
+    def read(self, image_bytes: bytes, roster: Optional[list[str]] = None) -> list[OcrRow]:
+        """Send image to free.ai GOT-OCR 2.0 and parse the JSON response."""
+        client = self._get_client()
+        mime_type = _detect_mime(image_bytes)
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
+        log.info(
+            "freeai_ocr_request",
+            extra={"model": self.model_name, "mime": mime_type, "roster_aware": bool(roster)},
+        )
+
+        prompt = _build_prompt(roster)
+        data_url = f"data:{mime_type};base64,{image_b64}"
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url},
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt,
+                    },
+                ],
+            },
+        ]
+
+        def _call():
+            return client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.0,
+                max_tokens=8192,
+            )
+
+        try:
+            response = retry_call(
+                _call,
+                op="freeai_generate",
+                max_attempts=self.max_attempts,
+                base_s=self.base_s,
+                cap_s=self.cap_s,
+                include_quota=False,
+                context={"model": self.model_name},
+            )
+        except Exception as exc:
+            if self._is_token_limit(exc):
+                log.warning(
+                    "freeai_token_limit",
+                    extra={"error": str(exc)[:200]},
+                )
+                raise OcrUnavailableError(
+                    f"Free.ai daily token limit reached — {exc}"
+                ) from exc
+            log.error("freeai_api_error", extra={"error": str(exc)[:300]})
+            raise OcrUnavailableError(
+                f"Free.ai OCR failed — {exc}"
+            ) from exc
+
+        raw_text = ""
+        if response and response.choices:
+            content = response.choices[0].message.content
+            if content:
+                raw_text = content.strip()
+
+        if not raw_text:
+            log.error("freeai_empty_response")
+            raise OcrUnavailableError("Free.ai returned an empty response")
+
+        log.debug("freeai_raw_response", extra={"chars": len(raw_text)})
+        return _parse_gemini_response(raw_text)
+
+
+# ─── Gemini provider ─────────────────────────────────────────────────────────
 
 def _response_schema() -> dict:
     """JSON schema for Gemini structured output: an array of row objects.
@@ -339,81 +550,6 @@ class GeminiProvider(OcrProvider):
         return _parse_gemini_response(raw_text)
 
 
-def _detect_mime(image_bytes: bytes) -> str:
-    """Detect MIME type from magic bytes."""
-    if image_bytes[:3] == b"\xff\xd8\xff":
-        return "image/jpeg"
-    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
-        return "image/png"
-    if image_bytes[:4] in (b"RIFF", b"WEBP"):
-        return "image/webp"
-    return "image/jpeg"  # safe default
-
-
-def _parse_gemini_response(raw: str) -> list[OcrRow]:
-    """Parse the JSON array from Gemini's response text."""
-    # Strip markdown fences if present (model sometimes ignores the instruction)
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-    cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
-
-    try:
-        items = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        log.error("gemini_json_parse_error", extra={"error": str(exc), "raw": raw[:500]})
-        # Return a single unreadable row rather than crashing the pipeline
-        return [OcrRow(raw_name="[UNREADABLE]", status_mark=None, confidence=0.0, row_index=1)]
-
-    if not isinstance(items, list):
-        log.error("gemini_json_not_list", extra={"type": type(items).__name__, "raw": raw[:500]})
-        return [OcrRow(raw_name="[UNREADABLE]", status_mark=None, confidence=0.0, row_index=1)]
-
-    rows: list[OcrRow] = []
-    for i, item in enumerate(items):
-        if not isinstance(item, dict):
-            continue
-        raw_name = str(item.get("raw_name", "")).strip()
-        if not raw_name:
-            continue
-        mark = item.get("status_mark")
-        if mark is not None:
-            mark = str(mark).strip() or None
-        try:
-            conf = float(item.get("confidence", 0.5))
-        except (TypeError, ValueError):
-            conf = 0.0  # unparseable confidence → force human review
-        try:
-            row_idx = int(item.get("row_index", i + 1))
-        except (TypeError, ValueError):
-            row_idx = i + 1
-        bounding_box = item.get("bounding_box")
-
-        matched_roster_name = item.get("matched_roster_name")
-        if matched_roster_name is not None:
-            matched_roster_name = str(matched_roster_name).strip() or None
-        if matched_roster_name is not None:
-            # match_confidence (how sure it is of the student) overrides the plain
-            # OCR confidence (how sure it is of the handwriting) once a roster match
-            # is offered — that's the number the matcher actually cares about.
-            match_conf = item.get("match_confidence")
-            if match_conf is not None:
-                try:
-                    conf = min(max(float(match_conf), 0.0), 1.0)
-                except (TypeError, ValueError):
-                    pass
-
-        rows.append(OcrRow(
-            raw_name=raw_name,
-            status_mark=mark,
-            confidence=min(max(conf, 0.0), 1.0),
-            row_index=row_idx,
-            bounding_box=bounding_box,
-            matched_roster_name=matched_roster_name,
-        ))
-
-    log.info("gemini_ocr_done", extra={"rows_parsed": len(rows)})
-    return rows
-
-
 # ─── Mock provider (for testing without API calls) ────────────────────────────
 
 class MockProvider(OcrProvider):
@@ -441,28 +577,30 @@ def build_provider(cfg: dict) -> OcrProvider:
     """Build the OCR provider from the config dict (attendance.ocr section).
 
     Supported values for ``provider``:
-        ``"gemini"``      – Gemini Flash (default, cloud, best accuracy).
-        ``"tesseract"``   – Tesseract (offline, CPU; requires system package).
+        ``"freeai"``      – Free.ai GOT-OCR 2.0 (default, cloud, Arabic-optimised).
+        ``"gemini"``      – Gemini Flash (cloud, fallback).
         ``"mock"``        – Fixed rows for tests / dry-run demos.
     """
-    provider_name = cfg.get("provider", "gemini")
-    model = cfg.get("model", "gemini-3.1-flash-lite")
+    provider_name = cfg.get("provider", "freeai")
+    model = cfg.get("model", "got-ocr2")
     min_conf = float(cfg.get("min_confidence", 0.75))
 
-    if provider_name == "gemini":
-        return GeminiProvider(
+    if provider_name == "freeai":
+        return FreeAIProvider(
             model=model,
             min_confidence=min_conf,
             timeout_s=float(cfg.get("timeout_s", 60)),
             max_attempts=int(cfg.get("max_attempts", 3)),
+            api_key_env=cfg.get("freeai_api_key_env", "FREEAI_API_KEY"),
         )
-    elif provider_name == "tesseract":
-        from attendance.ocr_tesseract import TesseractProvider
-        return TesseractProvider(
-            lang=cfg.get("tesseract_lang", "eng"),
-            tesseract_cmd=cfg.get("tesseract_cmd") or None,
+    elif provider_name == "gemini":
+        return GeminiProvider(
+            model=model if model != "got-ocr2" else "gemini-3.1-flash-lite",
+            min_confidence=min_conf,
+            timeout_s=float(cfg.get("timeout_s", 60)),
+            max_attempts=int(cfg.get("max_attempts", 3)),
         )
     elif provider_name == "mock":
         return MockProvider()
 
-    raise ValueError(f"Unknown OCR provider: {provider_name!r}. Supported: gemini, tesseract, mock")
+    raise ValueError(f"Unknown OCR provider: {provider_name!r}. Supported: freeai, gemini, mock")

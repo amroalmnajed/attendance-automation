@@ -55,3 +55,7 @@ review_images/
 .temp/
 
 review_queue_backup/
+
+# Local CLI helper
+powershell.cmd
+encode_credentials.py

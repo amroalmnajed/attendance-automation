@@ -870,11 +870,9 @@ def _needs_second_look(row, min_conf: float, roster_aware: bool, include_unmatch
 def _read_sheet(*, dry_run: bool = False, **kwargs) -> list[OcrRow]:
     """OCR one sheet. Dry runs record no health events (see attendance/health.py).
 
-    When ``ocr_cfg.fallback_to_tesseract`` is ``true`` and the primary provider
+    When ``ocr_cfg.fallback_to_gemini`` is ``true`` and the primary provider
     raises :exc:`~attendance.ocr.OcrUnavailableError`, the call is retried with
-    :class:`~attendance.ocr_tesseract.TesseractProvider`.  A clear warning is
-    logged because Tesseract accuracy on handwritten names is significantly lower
-    than Gemini.
+    :class:`~attendance.ocr.GeminiProvider`.
     """
     from attendance.ocr import OcrUnavailableError
     ocr_cfg: dict = kwargs.get("ocr_cfg", {})
@@ -882,19 +880,20 @@ def _read_sheet(*, dry_run: bool = False, **kwargs) -> list[OcrRow]:
         try:
             return _read_sheet_inner(**kwargs)
         except OcrUnavailableError:
-            if not ocr_cfg.get("fallback_to_tesseract", False):
+            if not ocr_cfg.get("fallback_to_gemini", False):
                 raise
             log.warning(
-                "ocr_gemini_unavailable_falling_back_to_tesseract",
-                extra={"detail": "⚠️ Using Tesseract fallback — expect more review-queue items."},
+                "ocr_primary_unavailable_falling_back_to_gemini",
+                extra={"detail": "⚠️ Primary OCR unavailable — falling back to Gemini."},
             )
-            from attendance.ocr_tesseract import TesseractProvider
-            tesseract_provider = TesseractProvider(
-                lang=ocr_cfg.get("tesseract_lang", "eng"),
-                tesseract_cmd=ocr_cfg.get("tesseract_cmd") or None,
+            from attendance.ocr import GeminiProvider
+            gemini_provider = GeminiProvider(
+                model=ocr_cfg.get("gemini_fallback_model", "gemini-3.1-flash-lite"),
+                timeout_s=float(ocr_cfg.get("timeout_s", 60)),
+                max_attempts=int(ocr_cfg.get("max_attempts", 3)),
             )
             fallback_kwargs = dict(kwargs)
-            fallback_kwargs["provider"] = tesseract_provider
+            fallback_kwargs["provider"] = gemini_provider
             return _read_sheet_inner(**fallback_kwargs)
 
 

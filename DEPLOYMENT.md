@@ -11,7 +11,8 @@ Phase 4: Step-by-step setup, environment configuration, scheduling, and go-live 
 | Python | 3.11+ (3.9 works but is EOL) | `python --version` |
 | pip | latest | `pip --version` |
 | Google Cloud project | Any project with billing | console.cloud.google.com |
-| Gemini API key | Free tier or paid | aistudio.google.com |
+| Free.ai API key | free.ai dashboard | free.ai |
+| Gemini API key (fallback) | Free tier or paid | aistudio.google.com |
 
 > **Upgrade Python first.**  
 > `google-auth` already prints EOL warnings on Python 3.9. Run on 3.11+:  
@@ -358,50 +359,61 @@ There is no automatic rollback command. Add one if needed for production.
 5. Alerts: default thresholds are on. Alerts go only to admins. Lower `gemini_threshold` / `sheets_threshold` if you want earlier warnings.
 6. If the original zip with `.env`, the service-account key or the SSH keys was ever shared or committed, rotate those secrets now.
 
-## 16. OCR Fallback — Tesseract
+## 16. Free.ai OCR Setup
 
-When Gemini is unavailable (quota exhausted, network outage) the bot can fall
-back to Tesseract, an offline CPU-based OCR engine.
+The system uses **Free.ai GOT-OCR 2.0** as its primary OCR provider, optimised
+for Arabic handwriting recognition. When the free.ai daily token limit is reached
+(6,000/day free, 30,000/day with account), the system automatically falls back to
+**Gemini** as a secondary provider.
 
-> **Accuracy warning**: Tesseract accuracy on handwritten Arabic/English names
-> is *significantly* lower than Gemini.  Expect more items to land in the
-> review queue.  Use this only as a last resort.
+### 16a. Get an API key
 
-### 16a. Install Tesseract
+1. Sign up at [free.ai](https://www.free.ai/)
+2. Generate an API key from the dashboard
+3. Set the environment variable:
 
-| Platform | Command |
-|---|---|
-| Ubuntu / Debian | `sudo apt-get install -y tesseract-ocr` |
-| macOS | `brew install tesseract` |
-| Windows | Download from [UB-Mannheim](https://github.com/UB-Mannheim/tesseract/wiki); add install dir to `PATH` |
-| Railway (nixpacks) | Add `apt = ["tesseract-ocr"]` to `nixpacks.toml` |
+```bash
+export FREEAI_API_KEY="your-key-here"
+# Also keep GEMINI_API_KEY for fallback:
+export GEMINI_API_KEY="your-gemini-key"
+```
 
-### 16b. Enable in config
+### 16b. Configure in attendance.yaml
 
 ```yaml
 # config/attendance.yaml
 attendance:
   ocr:
-    fallback_to_tesseract: true   # fall back to Tesseract when Gemini fails
-    tesseract_lang: eng            # OCR language; use "ara" for Arabic-only sheets
-    # tesseract_cmd: /usr/bin/tesseract  # override binary path if not on PATH
+    provider: freeai               # freeai | gemini | mock
+    model: got-ocr2                # free.ai GOT-OCR 2.0 model
+    freeai_api_key_env: FREEAI_API_KEY
+    fallback_to_gemini: true       # fall back to Gemini when free.ai hits token limit
 ```
 
-You can also set `provider: tesseract` to use Tesseract as the *primary*
-provider (e.g., for fully offline deployments):
+You can also set `provider: gemini` to use Gemini as the primary provider
+(e.g., when free.ai is down):
 
 ```yaml
 attendance:
   ocr:
-    provider: tesseract
-    tesseract_lang: eng
+    provider: gemini
+    model: gemini-3.1-flash-lite
 ```
 
-### 16c. Verify
+### 16c. Token limits
 
-```powershell
-tesseract --version      # should print version 4.x or 5.x
-python -c "import pytesseract; pytesseract.get_tesseract_version(); print('OK')"
+| Tier | Daily limit |
+|---|---|
+| Free | 6,000 tokens/day |
+| Registered | 30,000 tokens/day |
+
+When the limit is reached, `OcrUnavailableError` is raised and the pipeline
+automatically retries with Gemini (if `fallback_to_gemini: true`).
+
+### 16d. Verify
+
+```bash
+python -c "from attendance.ocr import FreeAIProvider; print('FreeAIProvider OK')"
+python -c "import openai; print('openai SDK OK')"
 ```
-
 
