@@ -5,7 +5,7 @@ import json
 
 import yaml
 
-from attendance import history, pipeline, writer
+from attendance import history, row_processor, text_workflow, writer
 from tests.test_absent import FakeWS, cfg, fake_session  # noqa: F401  (cfg is a fixture)
 
 NAMES = ["Ahmed Hassan Ali", "Sara Mohamed Nour", "Omar Khaled Fathy"]
@@ -15,9 +15,9 @@ def _run(monkeypatch, cfg, tmp_path, marks, dry_run=False, session=3):
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     ws = FakeWS([""] * 6)
-    monkeypatch.setattr(pipeline, "resolve", lambda **_k: fake_session(ws, course="crash"))
+    monkeypatch.setattr(row_processor, "resolve", lambda **_k: fake_session(ws, course="crash"))
     monkeypatch.setattr(writer, "audit_write", lambda **_k: None)
-    return pipeline.run_text(names=NAMES, marks=marks, course="crash", session_num=session, dry_run=dry_run,
+    return text_workflow.run_text(names=NAMES, marks=marks, course="crash", session_num=session, dry_run=dry_run,
                              config_path=str(cfg_path), review_store_dir=str(tmp_path / "rq"))
 
 

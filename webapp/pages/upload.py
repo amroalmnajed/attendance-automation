@@ -1,6 +1,6 @@
 """webapp/pages/upload.py — Photo upload & processing screen (W2).
 
-Calls attendance.pipeline.run() / run_multi() with the same parameters the bot uses.
+Calls attendance.image_workflow.run() / run_multi() with the same parameters the bot uses.
 """
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from attendance.pipeline import STAGE_MATCHING, STAGE_READING, STAGE_SAVING, run, run_multi
+from attendance.image_workflow import run, run_multi
+from attendance.utils.progress import STAGE_MATCHING, STAGE_READING, STAGE_SAVING
 from core.notifier import RunSummary
 from webapp.config import (
     CONFIG_PATH,
@@ -171,7 +172,7 @@ def _page_upload() -> None:
             elif stage == STAGE_SAVING:
                 st.toast("✍️ Saving to the sheet…", icon="✍️")
 
-        # Run pipeline
+        # Run image workflow
         with st.spinner("Processing…"):
             try:
                 resolved_type = normalize_session_type(session_type, course_key, int(session_num)) if session_type else None

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import yaml
 
-from attendance import alias_admin, cli, pipeline, writer
+from attendance import alias_admin, cli, image_workflow, row_processor, text_workflow, writer
 from attendance.aliases import AliasStore
 from tests.test_absent import FakeWS, cfg, fake_session  # noqa: F401  (cfg is a fixture)
 
@@ -94,13 +94,13 @@ def _run(monkeypatch, cfg, tmp_path, dry_run):
     (tmp_path / "al.json").write_text(json.dumps({"crash": {"ahmed ali": {"Ahmed Hassan Ali": 1}}}), encoding="utf-8")
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
-    monkeypatch.setattr(pipeline, "resolve", lambda **_k: fake_session(FakeWS([""] * 6), course="crash"))
+    monkeypatch.setattr(row_processor, "resolve", lambda **_k: fake_session(FakeWS([""] * 6), course="crash"))
     monkeypatch.setattr(writer, "audit_write", lambda **_k: None)
-    pipeline.run_text(names=["Ahmed Ali"], course="crash", session_num=3, dry_run=dry_run,
+    text_workflow.run_text(names=["Ahmed Ali"], course="crash", session_num=3, dry_run=dry_run,
                       config_path=str(cfg_path), review_store_dir=str(tmp_path / "rq"))
 
 
-def test_pipeline_stamps_last_used_on_real_runs_only(monkeypatch, cfg, tmp_path):
+def test_text_workflow_stamps_last_used_on_real_runs_only(monkeypatch, cfg, tmp_path):
     _run(monkeypatch, cfg, tmp_path, dry_run=True)
     assert not (tmp_path / "al.meta.json").exists()
     _run(monkeypatch, cfg, tmp_path, dry_run=False)

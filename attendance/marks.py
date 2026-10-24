@@ -15,7 +15,7 @@ Rules
   and defaults to Present (today's behaviour).
 * A short single-word tail that is NOT a known mark (e.g. a typo such as "abcent")
   is **never guessed**: the line is flagged ``unrecognized`` and the raw token is
-  passed on as the mark, so the pipeline's mark gate sends it to human review.
+  passed on as the mark, so the workflow's mark gate sends it to human review.
 * Hyphens without surrounding spaces are never separators ("Abdel-Aziz" stays intact),
   unless the tail is a known mark ("Sara-absent").
 """
@@ -97,7 +97,7 @@ class ParsedLine:
 
     @property
     def effective_mark(self) -> str:
-        """Value to hand to the pipeline as ``status_mark``.
+        """Value to hand to the workflow as ``status_mark``.
 
         Unrecognized marks are passed through verbatim so the mark gate flags them.
         """
@@ -169,7 +169,7 @@ def parse_lines(lines: list[str]) -> list[ParsedLine]:
 
 
 def split_names_and_marks(parsed: list[ParsedLine]) -> tuple[list[str], list[str]]:
-    """Parallel (names, marks) lists ready for ``pipeline.run_text``."""
+    """Parallel (names, marks) lists ready for ``text_workflow.run_text``."""
     return [p.name for p in parsed], [p.effective_mark for p in parsed]
 
 

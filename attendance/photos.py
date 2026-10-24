@@ -9,7 +9,7 @@ Dedup rules
 * The same name on two different photos is merged into ONE row.
 * If their marks agree (or one photo has no mark), the better-read row wins.
 * If their marks CONFLICT (e.g. Present vs Absent), the row is kept once and
-  tagged ``conflict_marks`` so the pipeline sends it to human review
+  tagged ``conflict_marks`` so the workflow sends it to human review
   (reason ``PHOTO_MARK_CONFLICT``) instead of guessing.
 * A name that appears more than once on the SAME photo is never merged: two
   students can share a first name. Ambiguous repeats across photos are likewise

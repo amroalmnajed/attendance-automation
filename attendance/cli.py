@@ -79,7 +79,7 @@ def _load_cfg(path: str = "config/attendance.yaml") -> dict:
 # ─── Subcommand: process ──────────────────────────────────────────────────────
 
 def cmd_process(args: argparse.Namespace) -> None:
-    from attendance.pipeline import run
+    from attendance.image_workflow import run
 
     cfg = _load_cfg(args.config)
     dry_run = args.dry_run
@@ -99,7 +99,7 @@ def cmd_process(args: argparse.Namespace) -> None:
             review_store_dir=cfg["attendance"]["review"].get("local_dir", "review_queue"),
         )
     except Exception as exc:
-        log.error("pipeline_error", extra={"error": str(exc)})
+        log.error("workflow_error", extra={"error": str(exc)})
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -117,7 +117,7 @@ def cmd_process(args: argparse.Namespace) -> None:
 
 def cmd_zoom_attend(args: argparse.Namespace) -> None:
     """Interactive wizard for Zoom attendance: CSV upload or API fetch."""
-    from attendance.pipeline import run_zoom
+    from attendance.zoom_workflow import run_zoom
     from attendance.zoom_api import list_recent_meeting_instances
     from attendance.zoom_csv import (
         extract_date_from_filename,
@@ -353,7 +353,7 @@ def cmd_zoom_attend(args: argparse.Namespace) -> None:
             review_store_dir=review_dir,
         )
     except Exception as exc:
-        log.error("pipeline_error", extra={"error": str(exc)})
+        log.error("workflow_error", extra={"error": str(exc)})
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -382,7 +382,8 @@ def _ask(prompt: str, choices: list[str] | None = None) -> str:
 
 def cmd_attend(args: argparse.Namespace) -> None:
     """Unified interactive wizard: image OCR  OR  paste names directly."""
-    from attendance.pipeline import run, run_text
+    from attendance.image_workflow import run
+    from attendance.text_workflow import run_text
 
     cfg = _load_cfg(args.config)
     review_dir = cfg["attendance"]["review"].get("local_dir", "review_queue")
@@ -474,7 +475,7 @@ def cmd_attend(args: argparse.Namespace) -> None:
                 review_store_dir=review_dir,
             )
         except Exception as exc:
-            log.error("pipeline_error", extra={"error": str(exc)})
+            log.error("workflow_error", extra={"error": str(exc)})
             print(f"\n[ERROR] {exc}", file=sys.stderr)
             sys.exit(1)
 
@@ -515,7 +516,7 @@ def cmd_attend(args: argparse.Namespace) -> None:
                 review_store_dir=review_dir,
             )
         except Exception as exc:
-            log.error("pipeline_error", extra={"error": str(exc)})
+            log.error("workflow_error", extra={"error": str(exc)})
             print(f"\n[ERROR] {exc}", file=sys.stderr)
             sys.exit(1)
 
@@ -532,7 +533,7 @@ def _parse_marks_with_preview(lines: list[str], *, always_confirm: bool, assume_
     """Parse "name | mark" lines, print how each was read, and (when needed) confirm.
 
     Returns (names, marks). Exits cleanly if the user declines. Unrecognised marks are
-    never guessed: they are passed through so the pipeline sends them to review.
+    never guessed: they are passed through so the workflow sends them to review.
     """
     from attendance.marks import format_preview, has_issues, parse_lines, split_names_and_marks
 
@@ -555,7 +556,8 @@ def _parse_marks_with_preview(lines: list[str], *, always_confirm: bool, assume_
 
 
 def cmd_process_text(args: argparse.Namespace) -> None:
-    from attendance.pipeline import run_text, run_zoom
+    from attendance.text_workflow import run_text
+    from attendance.zoom_workflow import run_zoom
     from attendance.zoom_csv import (
         extract_date_from_filename,
         extract_meeting_id_from_filename,
@@ -654,7 +656,7 @@ def cmd_process_text(args: argparse.Namespace) -> None:
                 review_store_dir=cfg["attendance"]["review"].get("local_dir", "review_queue"),
             )
         except Exception as exc:
-            log.error("pipeline_error", extra={"error": str(exc)})
+            log.error("workflow_error", extra={"error": str(exc)})
             print(f"\n[ERROR] {exc}", file=sys.stderr)
             sys.exit(1)
 
@@ -721,7 +723,7 @@ def cmd_process_text(args: argparse.Namespace) -> None:
             review_store_dir=cfg["attendance"]["review"].get("local_dir", "review_queue"),
         )
     except Exception as exc:
-        log.error("pipeline_error", extra={"error": str(exc)})
+        log.error("workflow_error", extra={"error": str(exc)})
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 

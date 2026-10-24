@@ -1,4 +1,4 @@
-"""Runtime configuration bridge for Streamlit and the shared pipeline."""
+"""Runtime configuration bridge for Streamlit and the shared workflows."""
 from __future__ import annotations
 
 import os
@@ -26,7 +26,7 @@ _RUNTIME_SECRET_KEYS = (
 
 
 def configure_runtime_secrets(st_module: Any) -> None:
-    """Expose configured Streamlit secrets to the shared, env-based pipeline.
+    """Expose configured Streamlit secrets to the shared, env-based workflows.
 
     The attendance modules predate the webapp and read their configuration from
     ``os.environ``.  Streamlit Community Cloud provides values through

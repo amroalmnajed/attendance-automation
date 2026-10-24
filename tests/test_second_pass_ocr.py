@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from attendance import pipeline
+from attendance import image_workflow
 from attendance.ocr import OcrRow
 
 
@@ -28,7 +28,7 @@ class FakeProvider:
 
 def read(provider, ocr_cfg, roster=("M",)):
     cfg = {"min_confidence": 0.75, **ocr_cfg}
-    return pipeline._read_sheet(image_bytes=b"x", provider=provider, roster_names=list(roster) if roster else None,
+    return image_workflow._read_sheet(image_bytes=b"x", provider=provider, roster_names=list(roster) if roster else None,
                                 ocr_cfg=cfg, min_conf=0.75, upload_id="up1")
 
 
@@ -86,7 +86,7 @@ def test_different_model_or_provider_for_the_extra_read(monkeypatch):
     main = FakeProvider([row(1, "Sara", conf=0.4)])
     other = FakeProvider([row(1, "Sara", conf=0.9)])
     built = []
-    monkeypatch.setattr(pipeline, "build_provider", lambda c: built.append(c) or other)
+    monkeypatch.setattr(image_workflow, "build_provider", lambda c: built.append(c) or other)
     out = read(main, {"passes": 2, "model": "m1", "second_pass": {"mode": "low_confidence", "model": "m2", "provider": "mock"}})
     assert (main.calls, other.calls) == (1, 1)
     assert built[0]["model"] == "m2" and built[0]["provider"] == "mock"
@@ -102,10 +102,10 @@ def test_failed_second_pass_keeps_pass_one_but_failed_first_pass_raises():
 
 
 def test_mock_rows_from_other_tests_do_not_break_row_selection():
-    assert pipeline._needs_second_look(MagicMock(), 0.75, True, False) is False
+    assert image_workflow._needs_second_look(MagicMock(), 0.75, True, False) is False
 
 
 def test_run_and_run_multi_share_the_one_helper():
-    assert "_read_sheet(" in inspect.getsource(pipeline.run)
-    assert "_read_sheet(" in inspect.getsource(pipeline.run_multi)
-    assert "provider.read(" not in inspect.getsource(pipeline.run)
+    assert "_read_sheet(" in inspect.getsource(image_workflow.run)
+    assert "_read_sheet(" in inspect.getsource(image_workflow.run_multi)
+    assert "provider.read(" not in inspect.getsource(image_workflow.run)

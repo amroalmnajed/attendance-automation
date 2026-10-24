@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from attendance.ocr import OcrRow
-from attendance import pipeline
+from attendance import image_workflow
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -30,16 +30,16 @@ def _make_provider(calls_and_rows: list[list[OcrRow]]):
 # ─── _avg_confidence ──────────────────────────────────────────────────────────
 
 def test_avg_confidence_empty():
-    assert pipeline._avg_confidence([]) == 0.0
+    assert image_workflow._avg_confidence([]) == 0.0
 
 
 def test_avg_confidence_single():
-    assert abs(pipeline._avg_confidence([_row(conf=0.8)]) - 0.8) < 1e-9
+    assert abs(image_workflow._avg_confidence([_row(conf=0.8)]) - 0.8) < 1e-9
 
 
 def test_avg_confidence_multiple():
     rows = [_row(conf=0.6), _row(conf=0.4)]
-    assert abs(pipeline._avg_confidence(rows) - 0.5) < 1e-9
+    assert abs(image_workflow._avg_confidence(rows) - 0.5) < 1e-9
 
 
 # ─── retry_preprocessing NOT triggered (disabled) ─────────────────────────────
@@ -49,10 +49,10 @@ def test_retry_preprocess_disabled_no_extra_call(monkeypatch):
     low_conf_rows = [_row(conf=0.3)]
     provider = _make_provider([low_conf_rows])  # one call for pass 1
 
-    monkeypatch.setattr(pipeline, "prepare", lambda b, **kw: b)
+    monkeypatch.setattr(image_workflow, "prepare", lambda b, **kw: b)
 
     ocr_cfg = {"passes": 1, "retry_preprocessing": False, "min_confidence": 0.75}
-    rows = pipeline._read_sheet_inner(
+    rows = image_workflow._read_sheet_inner(
         image_bytes=b"img",
         provider=provider,
         roster_names=None,
@@ -73,10 +73,10 @@ def test_retry_preprocess_skipped_when_conf_ok(monkeypatch):
     high_conf_rows = [_row(conf=0.9)]
     provider = _make_provider([high_conf_rows])
 
-    monkeypatch.setattr(pipeline, "prepare", lambda b, **kw: b)
+    monkeypatch.setattr(image_workflow, "prepare", lambda b, **kw: b)
 
     ocr_cfg = {"passes": 1, "retry_preprocessing": True, "min_confidence": 0.75}
-    rows = pipeline._read_sheet_inner(
+    rows = image_workflow._read_sheet_inner(
         image_bytes=b"img",
         provider=provider,
         roster_names=None,
@@ -104,10 +104,10 @@ def test_retry_preprocess_accepted_when_alt_higher(monkeypatch):
         prepare_calls.append((b, kw))
         return b"alt_img"
 
-    monkeypatch.setattr(pipeline, "prepare", fake_prepare)
+    monkeypatch.setattr(image_workflow, "prepare", fake_prepare)
 
     ocr_cfg = {"passes": 1, "retry_preprocessing": True, "min_confidence": 0.75}
-    rows = pipeline._read_sheet_inner(
+    rows = image_workflow._read_sheet_inner(
         image_bytes=b"orig_img",
         provider=provider,
         roster_names=None,
@@ -137,10 +137,10 @@ def test_retry_preprocess_rejected_when_alt_lower(monkeypatch):
     alt_rows = [_row(conf=0.2, name="B")]
     provider = _make_provider([orig_rows, alt_rows])
 
-    monkeypatch.setattr(pipeline, "prepare", lambda b, **kw: b"alt_img")
+    monkeypatch.setattr(image_workflow, "prepare", lambda b, **kw: b"alt_img")
 
     ocr_cfg = {"passes": 1, "retry_preprocessing": True, "min_confidence": 0.75}
-    rows = pipeline._read_sheet_inner(
+    rows = image_workflow._read_sheet_inner(
         image_bytes=b"orig_img",
         provider=provider,
         roster_names=None,
@@ -161,10 +161,10 @@ def test_retry_preprocess_skipped_without_raw_bytes(monkeypatch):
     low_rows = [_row(conf=0.3)]
     provider = _make_provider([low_rows])
 
-    monkeypatch.setattr(pipeline, "prepare", lambda b, **kw: b)
+    monkeypatch.setattr(image_workflow, "prepare", lambda b, **kw: b)
 
     ocr_cfg = {"passes": 1, "retry_preprocessing": True, "min_confidence": 0.75}
-    rows = pipeline._read_sheet_inner(
+    rows = image_workflow._read_sheet_inner(
         image_bytes=b"img",
         provider=provider,
         roster_names=None,
@@ -194,10 +194,10 @@ def test_retry_preprocess_provider_error_falls_back(monkeypatch):
             raise RuntimeError("quota exhausted")
 
     provider = _FailingProvider()
-    monkeypatch.setattr(pipeline, "prepare", lambda b, **kw: b"alt_img")
+    monkeypatch.setattr(image_workflow, "prepare", lambda b, **kw: b"alt_img")
 
     ocr_cfg = {"passes": 1, "retry_preprocessing": True, "min_confidence": 0.75}
-    rows = pipeline._read_sheet_inner(
+    rows = image_workflow._read_sheet_inner(
         image_bytes=b"orig_img",
         provider=provider,
         roster_names=None,

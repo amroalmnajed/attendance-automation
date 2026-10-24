@@ -7,7 +7,11 @@
 # Directory & Component Map
 - `attendance/`: Core domain logic.
   - `cli.py`: Command-line interface entry points.
-  - `pipeline.py`: Orchestrates the main flow (OCR -> Normalize -> Match -> Write).
+  - `image_workflow.py`: Image-based attendance workflow (OCR -> Normalize -> Match -> Write).
+  - `text_workflow.py`: Text-input attendance workflow (names list -> Match -> Write).
+  - `zoom_workflow.py`: Zoom attendance workflow (CSV/API -> Match -> Write).
+  - `row_processor.py`: Shared post-OCR logic (matching, gating, writing, history) used by all workflows.
+  - `utils/`: Shared utilities (column_utils, hash_utils, progress, upload_utils).
   - `ocr.py`: Interfaces with OCR providers (`FreeAIProvider`, `GeminiProvider`, `MockProvider`) to extract names and marks.
   - `matcher.py`: Fuzzy matching logic comparing OCR names to canonical roster names.
   - `writer.py`: Handles Google Sheets API writes and batching.
@@ -22,10 +26,13 @@
 - `tests/`: Unit and evaluation tests (pytest).
 
 # Data Flow & Architecture
-1. **Input**: Image path, course, session provided via CLI.
+1. **Input**: Image path, course, session provided via CLI (or text input, or Zoom CSV).
 2. **Setup**: `session_resolver` pulls the current roster from Google Sheets.
-3. **Extraction**: `ocr` extracts `(raw_name, status_mark)` pairs from the image (FreeAI primary, Gemini fallback).
-4. **Normalization & Matching**: `normalizer` cleans strings; `matcher` fuzzy-matches them to the roster.
+3. **Extraction**: 
+   - Image workflow: `ocr` extracts `(raw_name, status_mark)` pairs from the image (FreeAI primary, Gemini fallback).
+   - Text workflow: Names parsed from text input.
+   - Zoom workflow: Participants parsed from CSV or Zoom API.
+4. **Normalization & Matching**: `normalizer` cleans strings; `matcher` fuzzy-matches them to the roster (via `row_processor.py`).
 5. **Writing**: Exact/high-confidence matches are written via `writer`. Low-confidence matches go to `review_queue`.
 6. **Review**: Humans resolve flagged items via `cli review resolve`, which completes the write and learns the alias.
 
@@ -33,6 +40,7 @@
 - **Code Style**: Standard Python PEP-8, use type hints (`from __future__ import annotations`).
 - **Configuration**: Driven by `config/attendance.yaml`. Secrets loaded via `.env` or GCP Secret Manager.
 - **Dry-run by default**: Critical operations default to dry-run mode to prevent accidental Sheet modifications.
+- **Workflow Organization**: Code is organized by use-case. To understand a workflow, read its workflow file (`image_workflow.py`, `text_workflow.py`, or `zoom_workflow.py`) plus `row_processor.py` for shared post-processing logic. No monolithic `pipeline.py` exists.
 
 # Environment & Configuration
 - **Env Vars Required**: `GOOGLE_APPLICATION_CREDENTIALS` (Service Account JSON), `FREEAI_API_KEY` (primary OCR), `CRASH_SHEET_ID`, `MAIN_SHEET_ID`, `G10_SHEET_ID`, `G9_SHEET_ID`.
@@ -48,7 +56,7 @@
 # Phase 3 additions (see CHANGELOG.md for config keys)
 - `attendance/history.py` — per-course counts for the summary comparison (`<review_dir>/_history/<course>.json`, numbers only).
 - `attendance/aliases.py` — `AliasStore` + dates in sidecar `learned_aliases.meta.json`; `entries()`, `remove()`, `flush_usage()`. `attendance/alias_admin.py` — pure functions behind `/aliases` (`admin_ids(cfg, env)` reads `ADMIN_TELEGRAM_IDS` + `attendance.admin.telegram_ids`).
-- `pipeline._read_sheet()` — the ONE OCR helper used by `run()` and `run_multi()` (modes `full` / `low_confidence`).
+- `image_workflow.run_multi()` — several photos, one `upload_id`. Image workflow handles multi-photo OCR and merging before matching.
 - `attendance/variants.py` — name-variant suggestions (`config/variant_suggestions.json`) and approval into `learned_variants:` of `config/name_variants.yaml`. CLI: `aliases variants list|review`.
 - Gotchas: `tests/conftest.py` snapshots/restores the real alias, alias-meta and variant-suggestion files. `/aliases` currently does its own admin check; Phase 4 replaces it with real roles.
 
@@ -56,7 +64,7 @@
 - `attendance/marks.py` — parses `name | mark` lines (text/paste mode). `parse_lines`, `split_names_and_marks`, `format_preview`.
 - `attendance/photos.py` — `merge_photo_rows` merges OCR rows from several photos before matching.
 - `attendance/absent.py` — "Mark N absent?" (crash/main only). Offer is recorded after each upload in `<review_dir>/_absent/<upload_id>.json` (row numbers only); the button re-reads the live sheet and writes only empty cells via `batch_write`.
-- `pipeline.run_multi()` = several photos, one `upload_id`. `pipeline.run_text(..., marks=[...])` carries per-line marks.
+- `image_workflow.run_multi()` = several photos, one `upload_id`. `text_workflow.run_text(..., marks=[...])` carries per-line marks.
 - Web app: paste-names screen shows a parse preview; unrecognised marks prompt confirmation before processing. Photo uploader supports multiple photos per upload.
 - Gotchas: `RunSummary` is logged whole by the notifier — never put student names on it. Several tests pass `MagicMock` rows, so new fields read from rows must tolerate non-int/None values. `tests/conftest.py` protects the real alias file.
 - Line endings: committed blobs are LF; the Windows working copy may show CRLF. Edit with tools that preserve each file's endings; never mass-convert. Work plan + rules: see HANDOFF.md.

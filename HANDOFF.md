@@ -68,3 +68,35 @@ SYSTEM DIRECTIVE FOR INCOMING AI:
 2. Run `git status` or inspect the working tree to verify the current state.
 3. All tasks in HANDOFF.md are complete and all 530+ tests are green. Proceed with any new user instructions.
 ```
+
+## Recent Architecture Refactoring (2026-10-24)
+The codebase was reorganized by use-case to improve AI comprehension:
+
+**Deleted:**
+- `attendance/pipeline.py` (1,080 lines) — monolithic file containing all workflows
+
+**Created:**
+- `attendance/image_workflow.py` — Image-based attendance flow (OCR orchestration, 2-pass logic, multi-photo processing)
+- `attendance/text_workflow.py` — Text-input attendance flow (name list parsing)
+- `attendance/zoom_workflow.py` — Zoom attendance flow (CSV/API parsing, duration calculation)
+- `attendance/row_processor.py` — Shared post-OCR logic (matching, gating, writing, history, review queue)
+- `attendance/utils/` package:
+  - `column_utils.py` — Column letter/index conversion
+  - `hash_utils.py` — Upload ID generation
+  - `progress.py` — Progress stage constants and callbacks
+  - `upload_utils.py` — Upload helpers
+
+**Key Principle:**
+To understand a workflow, read its workflow file (`image_workflow.py`, `text_workflow.py`, or `zoom_workflow.py`) plus `row_processor.py` for shared post-processing logic. No monolithic `pipeline.py` exists.
+
+**Updated Consumers:**
+- `attendance/cli.py` — imports from workflow modules directly
+- `webapp/pages/upload.py` — imports from `image_workflow` and `utils.progress`
+- `webapp/pages/names.py` — imports from `text_workflow` and `utils.progress`
+- `webapp/pages/zoom.py` — imports from `zoom_workflow`
+- `attendance/session_resolver.py` — uses `utils.column_utils`
+- `attendance/review_queue.py` — uses `utils.column_utils`
+- All tests — updated to use new modules and monkeypatch patterns
+
+**Testability Note:**
+When tests monkeypatch `attendance.row_processor.process_rows`, production code must access it as `row_processor.process_rows` (module-qualified), not via direct import, to ensure the monkeypatch intercepts the call.

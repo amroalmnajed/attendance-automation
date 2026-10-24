@@ -1,4 +1,4 @@
-"""core/notifier.py — Summary notification after each pipeline run.
+"""core/notifier.py — Summary notification after each workflow run.
 
 Channels: log (always active), email (via SMTP env vars), telegram (via bot token env var).
 Student names are never included in notifications.

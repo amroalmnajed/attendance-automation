@@ -22,6 +22,7 @@ from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 
 from attendance import _net
 from attendance._net import retry_call
+from attendance.utils.column_utils import col_letter_to_index, index_to_col_letter
 from core.auth import get_credentials
 from core.logger import get_logger
 
@@ -83,23 +84,6 @@ class ConfigSheetDrift(Exception):
 class SessionNotFound(Exception):
     """Raised when the declared session number has no matching column header."""
     pass
-
-
-def _col_letter_to_index(col: str) -> int:
-    """'A' → 1, 'B' → 2, 'AA' → 27, etc. (1-based)"""
-    result = 0
-    for ch in col.upper():
-        result = result * 26 + (ord(ch) - ord("A") + 1)
-    return result
-
-
-def _index_to_col_letter(idx: int) -> str:
-    """1 → 'A', 27 → 'AA', etc."""
-    result = ""
-    while idx > 0:
-        idx, rem = divmod(idx - 1, 26)
-        result = chr(rem + ord("A")) + result
-    return result
 
 
 class SheetSession:
@@ -246,8 +230,8 @@ def _resolve_uncached(
             f"in tab='{tab}' header_row={header_row}"
         )
 
-    session_col = _index_to_col_letter(session_col_idx)
-    type_col = _index_to_col_letter(type_col_idx) if type_col_idx else None
+    session_col = index_to_col_letter(session_col_idx)
+    type_col = index_to_col_letter(type_col_idx) if type_col_idx else None
 
     log.info(
         "session_resolved",
@@ -281,7 +265,7 @@ def _resolve_uncached(
             )
 
     # ── Read roster ───────────────────────────────────────────────────────────
-    name_col_idx = _col_letter_to_index(course_cfg.get("name_col", "A")) - 1  # 0-based
+    name_col_idx = col_letter_to_index(course_cfg.get("name_col", "A")) - 1  # 0-based
     roster: list[tuple[str, int]] = []
 
     for row_idx in range(first_student_row - 1, len(all_values)):  # 0-based

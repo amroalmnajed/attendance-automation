@@ -163,7 +163,7 @@ def test_retry_pending_writes_recovers(tmp_path, monkeypatch):
 
 
 def test_normal_write_refuses_toctou_conflict(tmp_path):
-    """A value changed after the pipeline read it is never overwritten and is queued for review."""
+    """A value changed after the workflow read it is never overwritten and is queued for review."""
     sent = []
 
     class _WS:

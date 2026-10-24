@@ -5,6 +5,9 @@ import json
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
+
+import gspread
 
 import pytest
 import yaml
@@ -556,11 +559,11 @@ def test_clean_zoom_name():
     assert clean_zoom_name("   ") == ""
 
 
-# ─── run_zoom pipeline tests ─────────────────────────────────────────────────
+# ─── run_zoom workflow tests ─────────────────────────────────────────────────
 
 def test_run_zoom_teacher_not_found(tmp_path):
     """When teacher is not in CSV and no manual start time provided, sets teacher_not_found=True."""
-    from attendance.pipeline import run_zoom
+    from attendance.zoom_workflow import run_zoom
 
     csv_file = tmp_path / "participants_81795786552_2026_09_13.csv"
     csv_file.write_text(
@@ -580,7 +583,9 @@ def test_run_zoom_teacher_not_found(tmp_path):
 
 def test_run_zoom_with_manual_start_time(tmp_path, monkeypatch):
     """When teacher is missing but manual_start_time is given, proceeds with attendance calculation."""
-    from attendance.pipeline import run_zoom
+    from attendance.zoom_workflow import run_zoom
+    from attendance.session_resolver import SheetSession
+    import attendance.row_processor as row_processor_mod
 
     csv_file = tmp_path / "participants_81795786552_2026_09_13.csv"
     csv_file.write_text(
@@ -595,7 +600,28 @@ def test_run_zoom_with_manual_start_time(tmp_path, monkeypatch):
         captured_ocr_rows.extend(kw.get("ocr_rows", []))
         return kw["summary"]
 
-    monkeypatch.setattr("attendance.pipeline._process_rows", mock_process_rows)
+    mock_ws = mock.Mock(spec=gspread.Worksheet)
+    mock_ws.id = 12345
+    mock_ws.col_values.return_value = ["Present", "Late", "Absent"]
+
+    def mock_resolve(*args, **kwargs):
+        session = SheetSession(
+            course="g10",
+            session_num=1,
+            session_col="C",
+            type_col=None,
+            roster=[("Ahmed Ali", 2)],
+            allowed_attendance=["Present", "Late", "Absent"],
+            allowed_types=None,
+            sheet_id="test_sheet",
+            tab="test_tab",
+            gc=None,
+        )
+        session.get_worksheet = mock.Mock(return_value=mock_ws)
+        return session
+
+    monkeypatch.setattr(row_processor_mod, "process_rows", mock_process_rows)
+    monkeypatch.setattr(row_processor_mod, "resolve", mock_resolve)
 
     summary = run_zoom(
         source=str(csv_file),

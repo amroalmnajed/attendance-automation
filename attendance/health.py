@@ -2,7 +2,7 @@
 
 * ``record(kind)`` is called from the existing failure paths (Gemini fallback, Sheets write failure). It is a
   one-liner that can NEVER raise and never waits on the network: alerts go out from a background thread.
-* It does nothing until ``configure(cfg)`` ran (bot start / pipeline start), so unit tests and scripts that never
+* It does nothing until ``configure(cfg)`` ran (bot start / workflow start), so unit tests and scripts that never
   configured it cannot touch real state files.
 * Dry-run uploads record nothing (``dry_run_scope``).
 * State is tiny and has NO names or error bodies: ``<review_dir>/_health/state.json`` =

@@ -21,6 +21,7 @@ from attendance import aliases, writer
 from attendance.matcher import MatchResult, ReasonCode
 from attendance.ocr import OcrRow
 from attendance.session_resolver import SheetSession
+from attendance.utils.column_utils import col_letter_to_index
 from attendance.writer import WriteCell
 from core.logger import get_logger
 
@@ -96,9 +97,8 @@ def resolve_item(
     # For typed_pair courses (g9/g10) also write the session-type cell
     session_type = item.get("session_type")
     if session_info.type_col and session_type:
-        from attendance.pipeline import _col_idx
         ws = session_info.get_worksheet()
-        type_col_data = ws.col_values(_col_idx(session_info.type_col))
+        type_col_data = ws.col_values(col_letter_to_index(session_info.type_col))
         type_current = type_col_data[roster_row - 1] if roster_row <= len(type_col_data) else ""
         if not type_current.strip():
             cells.append(WriteCell(

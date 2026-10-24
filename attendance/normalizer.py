@@ -1,6 +1,6 @@
 """attendance/normalizer.py — Name and attendance-mark normalisation.
 
-English-only pipeline:
+English-only workflow:
   1. Latin name normalisation (lowercase, strip accents/punctuation, collapse spaces).
   2. Variant folding via config/name_variants.yaml.
   3. Attendance mark → canonical attendance value.

@@ -154,12 +154,12 @@ def test_freeai_empty_response_raises_unavailable(monkeypatch):
         p.read(b"\xff\xd8\xff")
 
 
-# ─── 4. FreeAI → Gemini pipeline fallback ────────────────────────────────────
+# ─── 4. FreeAI → Gemini image workflow fallback ────────────────────────────────────
 
-def test_pipeline_fallback_to_gemini_when_freeai_raises(monkeypatch):
+def test_image_workflow_fallback_to_gemini_when_freeai_raises(monkeypatch):
     """When FreeAI raises OcrUnavailableError and fallback_to_gemini=True,
     _read_sheet should retry with GeminiProvider and return its rows."""
-    from attendance import pipeline
+    from attendance import image_workflow
 
     fallback_rows = [OcrRow(raw_name="Fallback", status_mark=None, confidence=0.6, row_index=1)]
 
@@ -184,7 +184,7 @@ def test_pipeline_fallback_to_gemini_when_freeai_raises(monkeypatch):
         "fallback_to_gemini": True,
     }
 
-    rows = pipeline._read_sheet(
+    rows = image_workflow._read_sheet(
         image_bytes=b"img",
         provider=_FreeAIFailProvider(),
         roster_names=None,
@@ -197,9 +197,9 @@ def test_pipeline_fallback_to_gemini_when_freeai_raises(monkeypatch):
     assert rows == fallback_rows
 
 
-def test_pipeline_no_fallback_when_flag_is_false(monkeypatch):
+def test_image_workflow_no_fallback_when_flag_is_false(monkeypatch):
     """When fallback_to_gemini=False, OcrUnavailableError must propagate."""
-    from attendance import pipeline
+    from attendance import image_workflow
 
     class _FreeAIFailProvider:
         def read(self, image_bytes, roster=None):
@@ -213,7 +213,7 @@ def test_pipeline_no_fallback_when_flag_is_false(monkeypatch):
     }
 
     with pytest.raises(OcrUnavailableError):
-        pipeline._read_sheet(
+        image_workflow._read_sheet(
             image_bytes=b"img",
             provider=_FreeAIFailProvider(),
             roster_names=None,

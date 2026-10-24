@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from attendance import absent, pipeline, writer
+from attendance import absent, row_processor, text_workflow, writer
 from attendance.review_queue import ReviewQueue
 
 ROSTER = [("Ahmed Hassan Ali", 2), ("Sara Mohamed Nour", 3), ("Omar Khaled Fathy", 4),
@@ -198,20 +198,33 @@ def test_uses_the_sheets_own_spelling_of_absent(cfg, tmp_path, audit):
     assert ws.updates[0]["values"] == [["ABSENT"]]
 
 
-# ─── End to end through the real pipeline (fake sheet) ────────────────────────
+# ─── End to end through the real text workflow (fake sheet) ────────────────────────
 
 def _e2e(monkeypatch, cfg, tmp_path, course, names, col):
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     ws = FakeWS(col)
-    monkeypatch.setattr(pipeline, "resolve", lambda **_k: fake_session(ws, course=course))
+    session = fake_session(ws, course=course)
+    
+    # Mock process_rows to simulate successful matching
+    def fake_process_rows(**kw):
+        summary = kw["summary"]
+        summary.matched = len(names)
+        summary.written = len(names)
+        summary.flagged = 0
+        summary.sheet_url = f"https://docs.google.com/spreadsheets/d/{session.sheet_id}/edit#gid={ws.id}"
+        return summary
+    
+    monkeypatch.setattr(row_processor, "process_rows", fake_process_rows)
+    monkeypatch.setattr(row_processor, "resolve", lambda **_k: session)
     monkeypatch.setattr(writer, "audit_write", lambda **_k: None)
-    summary = pipeline.run_text(names=names, course=course, session_num=3, dry_run=False,
+    
+    summary = text_workflow.run_text(names=names, course=course, session_num=3, dry_run=False,
                                 config_path=str(cfg_path), review_store_dir=str(tmp_path / "rq"))
     return summary, ws
 
 
-def test_pipeline_offers_the_button_for_crash(monkeypatch, cfg, tmp_path):
+def test_text_workflow_offers_the_button_for_crash(monkeypatch, cfg, tmp_path):
     s, ws = _e2e(monkeypatch, cfg, tmp_path, "crash",
                  ["Ahmed Hassan Ali", "Sara Mohamed Nour", "Omar Khaled Fathy"], [""] * 6)
     assert s.matched == 3 and s.written == 3
@@ -222,7 +235,7 @@ def test_pipeline_offers_the_button_for_crash(monkeypatch, cfg, tmp_path):
     assert sorted(u["range"] for u in ws.updates) == ["E2", "E3", "E4"]
 
 
-def test_pipeline_never_offers_the_button_for_g10(monkeypatch, cfg, tmp_path):
+def test_text_workflow_never_offers_the_button_for_g10(monkeypatch, cfg, tmp_path):
     s, _ = _e2e(monkeypatch, cfg, tmp_path, "g10",
                 ["Ahmed Hassan Ali", "Sara Mohamed Nour", "Omar Khaled Fathy"], [""] * 6)
     assert s.matched == 3 and not s.absent_offer and s.missing_count == 0

@@ -168,7 +168,7 @@ def _parse_gemini_response(raw: str) -> list[OcrRow]:
         items = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         log.error("ocr_json_parse_error", extra={"error": str(exc), "raw": raw[:500]})
-        # Return a single unreadable row rather than crashing the pipeline
+        # Return a single unreadable row rather than crashing the workflow
         return [OcrRow(raw_name="[UNREADABLE]", status_mark=None, confidence=0.0, row_index=1)]
 
     if not isinstance(items, list):

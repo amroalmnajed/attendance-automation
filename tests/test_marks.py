@@ -66,7 +66,7 @@ def test_trailing_separator_with_nothing_after_is_just_the_name():
 def test_unrecognised_mark_is_never_guessed(line):
     p = parse_line(line)
     assert p.kind == KIND_UNRECOGNIZED and p.canonical is None
-    # the raw token is passed on, so the pipeline's mark gate sends the row to review
+    # the raw token is passed on, so the workflow's mark gate sends the row to review
     assert p.effective_mark == p.mark_raw
     assert normalize_is_none(p.effective_mark)
 

@@ -1,6 +1,6 @@
 """webapp/pages/zoom.py — Zoom ingestion screen (W4).
 
-Calls attendance.pipeline.run_zoom() with two paths:
+Calls attendance.zoom_workflow.run_zoom() with two paths:
 - Meeting ID + date (Zoom API fetch) — auto-detects Meeting ID and latest date
 - CSV file upload
 """
@@ -15,12 +15,8 @@ from typing import Optional
 import streamlit as st
 import yaml
 
-from attendance.pipeline import (
-    STAGE_MATCHING,
-    STAGE_READING,
-    STAGE_SAVING,
-    run_zoom,
-)
+from attendance.utils.progress import STAGE_MATCHING, STAGE_READING, STAGE_SAVING
+from attendance.zoom_workflow import run_zoom
 from attendance.zoom_api import list_recent_meeting_instances
 from webapp.config import (
     CONFIG_PATH,
@@ -370,7 +366,7 @@ def _execute_zoom_run(
     manual_start_time: Optional[str] = None,
     explicit_session_type: Optional[str] = None,
 ) -> None:
-    """Execute Zoom ingestion pipeline with state management."""
+    """Execute Zoom ingestion workflow with state management."""
     def progress(stage: str) -> None:
         if stage == STAGE_READING:
             st.toast("📷 Reading Zoom data…", icon="📷")

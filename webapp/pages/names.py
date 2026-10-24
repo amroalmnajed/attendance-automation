@@ -1,13 +1,13 @@
 """webapp/pages/names.py — Paste-names screen (W3).
 
-Calls attendance.pipeline.run_text() with preview-before-submit UX.
+Calls attendance.text_workflow.run_text() with preview-before-submit UX.
 """
 from __future__ import annotations
 
 import streamlit as st
 
 from attendance.marks import format_preview, has_issues, parse_lines, split_names_and_marks
-from attendance.pipeline import run_text
+from attendance.text_workflow import run_text
 from webapp.config import (
     CONFIG_PATH,
     COURSES,
@@ -162,13 +162,13 @@ def _process_names(
     session_type: str | None,
     dry_run: bool,
 ) -> None:
-    """Process the parsed names through the pipeline."""
+    """Process the parsed names through the text workflow."""
     # Split into names and marks lists
     names, marks = split_names_and_marks(parsed)
 
     # Progress callback
     def progress(stage: str) -> None:
-        from attendance.pipeline import STAGE_MATCHING, STAGE_READING, STAGE_SAVING
+        from attendance.utils.progress import STAGE_MATCHING, STAGE_READING, STAGE_SAVING
 
         if stage == STAGE_READING:
             st.toast("📷 Reading names…", icon="📷")
@@ -177,7 +177,7 @@ def _process_names(
         elif stage == STAGE_SAVING:
             st.toast("✍️ Saving to the sheet…", icon="✍️")
 
-    # Run pipeline
+    # Run text workflow
     with st.spinner("Processing…"):
         try:
             summary = run_text(

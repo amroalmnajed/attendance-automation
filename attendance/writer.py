@@ -18,11 +18,11 @@ from attendance import health
 from attendance._net import retry_call
 from attendance.session_resolver import (
     SheetSession,
-    _col_letter_to_index,
     _get_client,
     _open_worksheet,
     invalidate as invalidate_session_cache,
 )
+from attendance.utils.column_utils import col_letter_to_index
 from core.logger import audit_write, get_logger
 
 log = get_logger("writer")
@@ -59,7 +59,7 @@ def reconcile_cells(ws, cells: list[WriteCell]) -> tuple[list[WriteCell], list[W
     """
     values_by_col: dict[str, list[object]] = {}
     for col in {cell.col for cell in cells}:
-        values_by_col[col] = ws.col_values(_col_letter_to_index(col))
+        values_by_col[col] = ws.col_values(col_letter_to_index(col))
 
     safe: list[WriteCell] = []
     already_applied: list[WriteCell] = []
@@ -131,7 +131,7 @@ def check_existing(
     if isinstance(first_elem, WriteCell):
         cols_needed = {c.col for c in row_numbers if isinstance(c, WriteCell)}
         for c_letter in cols_needed:
-            col_idx = _col_letter_to_index(c_letter)
+            col_idx = col_letter_to_index(c_letter)
             col_vals = ws.col_values(col_idx)
             for c in row_numbers:
                 if isinstance(c, WriteCell) and c.col == c_letter:
@@ -143,7 +143,7 @@ def check_existing(
         return False
 
     if col is not None:
-        col_idx = _col_letter_to_index(col) if isinstance(col, str) and not str(col).isdigit() else int(col)
+        col_idx = col_letter_to_index(col) if isinstance(col, str) and not str(col).isdigit() else int(col)
         col_vals = ws.col_values(col_idx)
         for r in row_numbers:
             row_idx = int(r)

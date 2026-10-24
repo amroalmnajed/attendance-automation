@@ -3,7 +3,7 @@
 After an upload, the bot can offer to mark every roster student who was not on
 the sheet as Absent. This module owns the data side of that:
 
-* ``record_pending``  — called by the pipeline after an upload; saves what the
+* ``record_pending``  — called by the workflow after an upload; saves what the
   button needs (no student names; row numbers only) and returns the counts.
 * ``mark_missing_absent`` — called when the button is tapped; re-reads the live
   sheet and writes "Absent" through the normal ``batch_write`` path.
@@ -165,7 +165,8 @@ def mark_missing_absent(
     session_info=None,            # injectable for tests; resolved live otherwise
 ) -> AbsentResult:
     from attendance.review_queue import ReviewQueue
-    from attendance.session_resolver import _col_letter_to_index, resolve
+    from attendance.session_resolver import resolve
+    from attendance.utils.column_utils import col_letter_to_index
     from attendance.writer import WriteCell, batch_write
 
     rec = load_pending(review_dir, upload_id)
@@ -197,7 +198,7 @@ def mark_missing_absent(
         return AbsentResult(ok=False, reason="value_not_allowed", dry_run=dry_run)
 
     ws = session_info.get_worksheet()
-    col_idx = _col_letter_to_index(session_info.session_col)
+    col_idx = col_letter_to_index(session_info.session_col)
     col_data = retry_call(
         lambda: ws.col_values(col_idx), op="sheets_read_col",
         max_attempts=int(retry_cfg.get("max_attempts", 6)),

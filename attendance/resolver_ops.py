@@ -141,9 +141,9 @@ def resolve_item(
         ]
 
         if session_info.type_col and session_type:
-            from attendance.pipeline import _col_idx
+            from attendance.utils.column_utils import col_letter_to_index
             ws = session_info.get_worksheet()
-            type_col_data = ws.col_values(_col_idx(session_info.type_col))
+            type_col_data = ws.col_values(col_letter_to_index(session_info.type_col))
             type_current = type_col_data[chosen_row - 1] if chosen_row <= len(type_col_data) else ""
             if not type_current.strip():
                 cells.append(WriteCell(

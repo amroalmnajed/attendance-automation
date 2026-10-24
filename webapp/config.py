@@ -2,7 +2,7 @@
 
 CourseConfig / _secret() / COURSES pattern for webapp configuration.
 Reads course keys and display names from config/attendance.yaml (ground truth)
-instead of hard-coding them, so the webapp never drifts from the pipeline config.
+instead of hard-coding them, so the webapp never drifts from the workflow config.
 Falls back to the known course keys (crash/main/g9/g10) when the YAML is absent
 (e.g. during unit tests that do not have the full repo mounted).
 """
@@ -112,7 +112,7 @@ def _load_courses() -> dict[str, CourseConfig]:
 # Module-level registry — imported by app.py and every page module
 COURSES: dict[str, CourseConfig] = _load_courses()
 
-# Absolute path to the pipeline config — pass as config_path= in pipeline calls
+# Absolute path to the workflow config — pass as config_path= in workflow calls
 CONFIG_PATH: str = str(_CONFIG_YAML)
 
 

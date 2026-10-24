@@ -1,5 +1,5 @@
 import pytest
-from attendance.pipeline import load_config, run
+from attendance.image_workflow import load_config, run
 from core.notifier import RunSummary
 
 def test_load_config_missing_file():

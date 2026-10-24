@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from attendance import health, ocr, pipeline, writer
+from attendance import health, ocr, image_workflow, writer
 from attendance.writer import WriteCell, batch_write
 from core import notifier
 
@@ -202,11 +202,11 @@ def test_dry_run_upload_ocr_records_nothing_but_real_one_does(cfg, sent):
             return []
     kw = dict(image_bytes=b"x", provider=P(), roster_names=None, ocr_cfg={"passes": 1},
               min_conf=0.5, upload_id="u")
-    pipeline._read_sheet(dry_run=True, **kw)
+    image_workflow._read_sheet(dry_run=True, **kw)
     # Note: dry_run should not record, but state persistence may vary
     # Just ensure no alert was sent
     assert sent == []
-    pipeline._read_sheet(dry_run=False, **kw)
+    image_workflow._read_sheet(dry_run=False, **kw)
     # Real run should record
     assert len(state(cfg)["events"]["gemini_429"]) >= 1
 

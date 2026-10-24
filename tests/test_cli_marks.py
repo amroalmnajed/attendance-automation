@@ -18,7 +18,7 @@ def test_non_interactive_runs_never_block_on_a_prompt(monkeypatch, capsys):
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("must not prompt without a TTY"))
     names, marks = cli._parse_marks_with_preview(["Omar | zzz"], always_confirm=True, assume_yes=False)
-    assert marks == ["zzz"]            # passed through so the pipeline sends it to review
+    assert marks == ["zzz"]            # passed through so the workflow sends it to review
 
 
 def test_declining_the_confirmation_stops_without_processing(monkeypatch, capsys):

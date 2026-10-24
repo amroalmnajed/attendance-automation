@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from attendance import pipeline, writer
+from attendance import image_workflow, row_processor, writer
 from attendance.ocr import OcrRow
 from tests.test_absent import ALLOWED, ROSTER, FakeWS, fake_session
 
@@ -41,8 +41,8 @@ def env(monkeypatch, tmp_path):
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
 
     ws = FakeWS([""] * 6)
-    monkeypatch.setattr(pipeline, "resolve", lambda **_k: fake_session(ws, course="g10"))
-    monkeypatch.setattr(pipeline, "prepare", lambda b, **_k: b)
+    monkeypatch.setattr(row_processor, "resolve", lambda **_k: fake_session(ws, course="g10"))
+    monkeypatch.setattr(image_workflow, "prepare", lambda b, **_k: b)
     monkeypatch.setattr(writer, "audit_write", lambda **_k: None)
 
     photos = []
@@ -54,8 +54,8 @@ def env(monkeypatch, tmp_path):
 
 
 def go(env, monkeypatch, provider, paths):
-    monkeypatch.setattr(pipeline, "build_provider", lambda _cfg: provider)
-    return pipeline.run_multi(image_paths=paths, course="g10", session_num=3, dry_run=False,
+    monkeypatch.setattr(image_workflow, "build_provider", lambda _cfg: provider)
+    return image_workflow.run_multi(image_paths=paths, course="g10", session_num=3, dry_run=False,
                               config_path=env.cfg_path, review_store_dir=str(env.tmp / "rq"))
 
 
@@ -131,11 +131,11 @@ def test_missing_file_is_reported_not_raised(env, monkeypatch):
 
 def test_a_single_photo_behaves_exactly_like_run(env, monkeypatch):
     called = {}
-    monkeypatch.setattr(pipeline, "run", lambda **kw: called.update(kw) or "single")
-    assert pipeline.run_multi(image_paths=[env.photos[0]], course="g10", session_num=3) == "single"
+    monkeypatch.setattr(image_workflow, "run", lambda **kw: called.update(kw) or "single")
+    assert image_workflow.run_multi(image_paths=[env.photos[0]], course="g10", session_num=3) == "single"
     assert called["image_path"] == env.photos[0]
 
 
 def test_empty_list_is_rejected():
     with pytest.raises(ValueError):
-        pipeline.run_multi(image_paths=[], course="g10", session_num=3)
+        image_workflow.run_multi(image_paths=[], course="g10", session_num=3)
