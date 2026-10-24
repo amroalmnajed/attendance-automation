@@ -62,9 +62,15 @@ def _emit(progress: Optional[ProgressFn], stage: str) -> None:
 def load_config(path: str = "config/attendance.yaml") -> dict:
     try:
         with open(path, encoding="utf-8") as f:
-            return yaml.safe_load(f)
+            cfg = yaml.safe_load(f)
     except FileNotFoundError:
         raise RuntimeError(f"Configuration file not found: {path}")
+    from attendance.config_model import ConfigError, validate_cfg
+    try:
+        validate_cfg(cfg)
+    except ConfigError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return cfg
 
 
 def _upload_id(image_bytes: bytes, course: str, session: int) -> str:

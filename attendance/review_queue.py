@@ -209,6 +209,32 @@ class _Store:
             conn.commit()
         return write_id
 
+    def enqueue_write_conflict(
+        self,
+        *,
+        upload_id: str,
+        course: str,
+        sheet_id: str,
+        tab: str,
+        cells: list[dict],
+        last_error: str,
+    ) -> str:
+        """Persist non-overwriting write conflicts for an operator to review."""
+        write_id = str(uuid.uuid4())[:12]
+        now = _now_iso()
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_writes (
+                    write_id, upload_id, course, sheet_id, tab, cells_json,
+                    retry_count, max_retries, last_error, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 'conflict', ?, ?)
+                """,
+                (write_id, upload_id, course, sheet_id, tab, json.dumps(cells, ensure_ascii=False), last_error[:300], now, now),
+            )
+            conn.commit()
+        return write_id
+
     def list_pending_writes(self) -> list[dict]:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
@@ -228,11 +254,69 @@ class _Store:
                 rows.append(d)
             return rows
 
+    def list_conflicts(self) -> list[dict]:
+        """List write conflicts awaiting manual review."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT write_id, upload_id, course, sheet_id, tab, cells_json,
+                       retry_count, max_retries, last_error, status, created_at, updated_at
+                FROM pending_writes
+                WHERE status = 'conflict'
+                ORDER BY created_at ASC
+                """
+            )
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                d["cells"] = json.loads(d["cells_json"])
+                rows.append(d)
+            return rows
+
+    def claim_pending_writes(self) -> list[dict]:
+        """Atomically claim queued writes so two workers cannot replay one batch."""
+        now = _now_iso()
+        with sqlite3.connect(str(self._db_path), timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """SELECT write_id, upload_id, course, sheet_id, tab, cells_json,
+                          retry_count, max_retries, last_error, status, created_at, updated_at
+                   FROM pending_writes
+                   WHERE status = 'pending' AND retry_count < max_retries
+                   ORDER BY created_at ASC"""
+            ).fetchall()
+            ids = [row["write_id"] for row in rows]
+            if ids:
+                conn.executemany(
+                    "UPDATE pending_writes SET status = 'processing', updated_at = ? WHERE write_id = ? AND status = 'pending'",
+                    [(now, write_id) for write_id in ids],
+                )
+            return [{**dict(row), "cells": json.loads(row["cells_json"])} for row in rows]
+
+    def release_stale_write_claims(self, older_than_seconds: int = 900) -> int:
+        """Return abandoned worker claims to pending status after a bounded lease."""
+        cutoff = datetime.now(CAIRO).timestamp() - older_than_seconds
+        released = 0
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute("SELECT write_id, updated_at FROM pending_writes WHERE status = 'processing'").fetchall()
+            for write_id, updated_at in rows:
+                try:
+                    stale = _parse_iso(updated_at).timestamp() < cutoff
+                except (TypeError, ValueError):
+                    stale = True
+                if stale:
+                    conn.execute("UPDATE pending_writes SET status = 'pending', updated_at = ? WHERE write_id = ?", (_now_iso(), write_id))
+                    released += 1
+            conn.commit()
+        return released
+
     def mark_write_success(self, write_id: str) -> None:
         now = _now_iso()
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(
-                "UPDATE pending_writes SET status = 'succeeded', updated_at = ? WHERE write_id = ?",
+                "UPDATE pending_writes SET status = 'succeeded', updated_at = ? WHERE write_id = ? AND status IN ('pending', 'processing')",
                 (now, write_id),
             )
             conn.commit()
@@ -247,7 +331,7 @@ class _Store:
                     last_error = ?,
                     status = CASE WHEN retry_count + 1 >= max_retries THEN 'abandoned' ELSE 'pending' END,
                     updated_at = ?
-                WHERE write_id = ?
+                WHERE write_id = ? AND status IN ('pending', 'processing')
                 """,
                 (error[:300], now, write_id),
             )
@@ -273,6 +357,20 @@ class _Store:
                 (upload_id, json.dumps(data, ensure_ascii=False), data.get("created_at", _now_iso()))
             )
             conn.commit()
+
+    def mutate_upload(self, upload_id: str, mutate) -> Any:
+        """Run a JSON-blob mutation under an immediate SQLite transaction."""
+        with sqlite3.connect(str(self._db_path), timeout=10) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT data FROM uploads WHERE upload_id = ?", (upload_id,)).fetchone()
+            data = json.loads(row[0]) if row else {"upload_id": upload_id, "created_at": _now_iso(), "items": []}
+            result = mutate(data)
+            conn.execute(
+                "INSERT OR REPLACE INTO uploads (upload_id, data, created_at) VALUES (?, ?, ?)",
+                (upload_id, json.dumps(data, ensure_ascii=False), data.get("created_at", _now_iso())),
+            )
+            conn.commit()
+            return result
 
     def find_by_prefix(self, prefix: str) -> Optional[str]:
         """Find full upload_id by short prefix. Returns None if not found or ambiguous."""
@@ -375,6 +473,24 @@ class ReviewQueue:
     def list_pending_writes(self) -> list[dict]:
         return self._store.list_pending_writes()
 
+    def list_conflicts(self) -> list[dict]:
+        return self._store.list_conflicts()
+
+    def claim_pending_writes(self) -> list[dict]:
+        self._store.release_stale_write_claims()
+        return self._store.claim_pending_writes()
+
+    def enqueue_write_conflict(self, **kwargs) -> str:
+        cells = kwargs.pop("cells")
+        cell_dicts = [
+            {"roster_name": getattr(c, "roster_name", ""), "sheet_row": getattr(c, "sheet_row", 0),
+             "col": getattr(c, "col", ""), "old_value": getattr(c, "old_value", None),
+             "new_value": getattr(c, "new_value", "")}
+            if not isinstance(c, dict) else c
+            for c in cells
+        ]
+        return self._store.enqueue_write_conflict(cells=cell_dicts, **kwargs)
+
     def mark_write_success(self, write_id: str) -> None:
         self._store.mark_write_success(write_id)
 
@@ -422,10 +538,9 @@ class ReviewQueue:
             ],
         }
 
-        # SQLite handles concurrency with WAL mode; no file_lock needed
-        data = self._load(upload_id)
-        data["items"].append(item)
-        self._save(upload_id, data)
+        # The whole read/append/save operation is transactional; WAL alone would
+        # not protect a read-modify-write JSON blob from a lost update.
+        self._store.mutate_upload(upload_id, lambda data: data["items"].append(item))
 
         log.info(
             "review_enqueued",
@@ -462,27 +577,23 @@ class ReviewQueue:
 
         SQLite with WAL mode handles concurrency safely. Raises ValueError if the item is already resolved.
         """
-        data = self._load(upload_id)
-        resolved_item = None
-        for item in data["items"]:
-            if item["item_id"] == item_id:
-                if item.get("status") == "resolved":
-                    raise ValueError(f"Item {item_id} already resolved")
-                item["status"] = "resolved"
-                item["resolved_at"] = _now_iso()
-                item["resolved_by"] = resolved_by
-                item["resolution"] = {
-                    "roster_row": chosen_roster_row,
-                    "roster_name": chosen_roster_name,
-                    "attendance_value": attendance_value,
-                }
-                resolved_item = item
-                break
-
-        if resolved_item is None:
+        def _resolve(data: dict) -> dict:
+            for item in data["items"]:
+                if item["item_id"] == item_id:
+                    if item.get("status") == "resolved":
+                        raise ValueError(f"Item {item_id} already resolved")
+                    item["status"] = "resolved"
+                    item["resolved_at"] = _now_iso()
+                    item["resolved_by"] = resolved_by
+                    item["resolution"] = {
+                        "roster_row": chosen_roster_row,
+                        "roster_name": chosen_roster_name,
+                        "attendance_value": attendance_value,
+                    }
+                    return item
             raise KeyError(f"Item {item_id} not found in upload {upload_id}")
 
-        self._save(upload_id, data)
+        resolved_item = self._store.mutate_upload(upload_id, _resolve)
         log.info(
             "review_resolved",
             extra={

@@ -1,7 +1,11 @@
 """Tests for T12: Sheets write failure fallback queue to SQLite + async retry."""
 from __future__ import annotations
 
+import datetime
 import json
+import sqlite3
+import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -85,6 +89,9 @@ def test_batch_write_failure_enqueues_to_sqlite(tmp_path, monkeypatch):
     store_dir = str(tmp_path / "rq")
 
     class _FailingWS:
+        def col_values(self, _index):
+            return []
+
         def batch_update(self, updates, value_input_option=None):
             raise RuntimeError("Google Sheets API 500 Internal Error")
 
@@ -136,6 +143,9 @@ def test_retry_pending_writes_recovers(tmp_path, monkeypatch):
     updates_sent = []
 
     class _MockWS:
+        def col_values(self, _index):
+            return []
+
         def batch_update(self, updates, value_input_option=None):
             updates_sent.extend(updates)
 
@@ -150,6 +160,339 @@ def test_retry_pending_writes_recovers(tmp_path, monkeypatch):
     # Queue should now be empty
     rq = ReviewQueue(store_dir=store_dir)
     assert len(rq.list_pending_writes()) == 0
+
+
+def test_normal_write_refuses_toctou_conflict(tmp_path):
+    """A value changed after the pipeline read it is never overwritten and is queued for review."""
+    sent = []
+
+    class _WS:
+        def col_values(self, _index):
+            return [""] * 4 + ["Late"]
+
+        def batch_update(self, updates, value_input_option=None):
+            sent.extend(updates)
+
+    class _Session:
+        course, sheet_id, tab = "g9", "sheet", "Tab"
+
+        def get_worksheet(self):
+            return _WS()
+
+    result = batch_write(
+        _Session(), [WriteCell("Alice", 5, "B", None, "Present")],
+        upload_id="u_conflict", dry_run=False, retry_cfg={"max_attempts": 1, "base_s": 0}, store_dir=str(tmp_path / "rq"),
+    )
+    assert result.written == []
+    assert sent == []
+    # Conflict should be queued for review, not as a pending retry
+    rq = ReviewQueue(store_dir=str(tmp_path / "rq"))
+    assert rq.list_pending_writes() == []
+    conflicts = rq.list_conflicts()
+    assert len(conflicts) == 1
+    assert conflicts[0]["upload_id"] == "u_conflict"
+    assert conflicts[0]["status"] == "conflict"
+    assert conflicts[0]["cells"][0]["roster_name"] == "Alice"
+
+
+def test_normal_write_skips_when_other_actor_already_applied_value(tmp_path):
+    sent = []
+
+    class _WS:
+        def col_values(self, _index):
+            return [""] * 4 + ["Present"]
+
+        def batch_update(self, updates, value_input_option=None):
+            sent.extend(updates)
+
+    class _Session:
+        course, sheet_id, tab = "g9", "sheet", "Tab"
+
+        def get_worksheet(self):
+            return _WS()
+
+    result = batch_write(
+        _Session(), [WriteCell("Alice", 5, "B", None, "Present")],
+        upload_id="u_done", dry_run=False, retry_cfg={"max_attempts": 1, "base_s": 0}, store_dir=str(tmp_path / "rq"),
+    )
+    assert result.written == []
+    assert len(result.skipped) == 1
+    assert sent == []
+
+
+def test_retry_refuses_changed_cell_and_claim_prevents_double_worker(tmp_path, monkeypatch):
+    store_dir = str(tmp_path / "rq")
+    enqueue_failed_write(
+        upload_id="u_conflict", course="g9", sheet_id="sid", tab="Tab",
+        cells=[WriteCell("Alice", 2, "C", None, "Present")], store_dir=store_dir,
+    )
+
+    class _WS:
+        def col_values(self, _index):
+            return ["", "Late"]
+
+        def batch_update(self, *_args, **_kwargs):
+            pytest.fail("conflicted retry must not write")
+
+    monkeypatch.setattr(writer, "_get_client", lambda retry_kw: None)
+    monkeypatch.setattr(writer, "_open_worksheet", lambda *_args: _WS())
+    assert retry_pending_writes(store_dir=store_dir) == 1
+    assert retry_pending_writes(store_dir=store_dir) == 0
+    rq = ReviewQueue(store_dir=store_dir)
+    assert rq.list_pending_writes() == []
+
+
+def test_mixed_batch_writes_safe_cells_and_retains_conflicts(tmp_path):
+    """A batch with safe, already-applied, and conflicting cells writes only safe cells and queues conflicts."""
+    sent = []
+
+    class _WS:
+        def col_values(self, _index):
+            # Row 5: already has "Present" (already-applied)
+            # Row 6: empty (safe)
+            # Row 7: has "Late" (conflict)
+            return [""] * 4 + ["Present", "", "Late"]
+
+        def batch_update(self, updates, value_input_option=None):
+            sent.extend(updates)
+
+    class _Session:
+        course, sheet_id, tab = "g9", "sheet", "Tab"
+
+        def get_worksheet(self):
+            return _WS()
+
+    cells = [
+        WriteCell("Alice", 5, "B", None, "Present"),  # already-applied
+        WriteCell("Bob", 6, "B", None, "Present"),    # safe
+        WriteCell("Charlie", 7, "B", None, "Present"), # conflict
+    ]
+
+    result = batch_write(
+        _Session(), cells,
+        upload_id="u_mixed", dry_run=False, retry_cfg={"max_attempts": 1, "base_s": 0}, store_dir=str(tmp_path / "rq"),
+    )
+    assert len(result.written) == 1
+    assert result.written[0].roster_name == "Bob"
+    assert len(result.skipped) == 1
+    assert result.skipped[0].roster_name == "Alice"
+    assert len(sent) == 1
+    assert sent[0]["range"] == "B6"
+
+    # Conflict should be queued for review
+    rq = ReviewQueue(store_dir=str(tmp_path / "rq"))
+    conflicts = rq.list_conflicts()
+    assert len(conflicts) == 1
+    assert conflicts[0]["cells"][0]["roster_name"] == "Charlie"
+
+
+def test_retry_mixed_batch_writes_safe_and_retains_conflicts(tmp_path, monkeypatch):
+    """A retry batch with safe and conflicting cells writes only safe cells and queues conflicts."""
+    store_dir = str(tmp_path / "rq")
+    cells = [
+        WriteCell("Diana", 2, "C", None, "Present"),   # safe
+        WriteCell("Eve", 3, "C", None, "Present"),     # already-applied
+        WriteCell("Frank", 4, "C", None, "Present"),   # conflict
+    ]
+    enqueue_failed_write(
+        upload_id="u_retry_mixed", course="g9", sheet_id="sid", tab="Tab",
+        cells=cells, store_dir=store_dir,
+    )
+
+    sent = []
+
+    class _WS:
+        def col_values(self, _index):
+            # Row 1: header (ignored)
+            # Row 2: empty (safe)
+            # Row 3: already has "Present" (already-applied)
+            # Row 4: has "Late" (conflict)
+            return ["header", "", "Present", "Late"]
+
+        def batch_update(self, updates, value_input_option=None):
+            sent.extend(updates)
+
+    monkeypatch.setattr(writer, "_get_client", lambda retry_kw: None)
+    monkeypatch.setattr(writer, "_open_worksheet", lambda *_args: _WS())
+
+    recovered = retry_pending_writes(store_dir=store_dir)
+    assert recovered == 1
+    assert len(sent) == 1
+    # The safe cell is row 2 (Diana)
+    assert sent[0]["range"] == "C2"
+
+    # Conflict should be queued for review
+    rq = ReviewQueue(store_dir=store_dir)
+    conflicts = rq.list_conflicts()
+    assert len(conflicts) == 1
+    assert conflicts[0]["cells"][0]["roster_name"] == "Frank"
+
+
+def test_concurrent_retry_workers_cannot_process_same_item(tmp_path, monkeypatch):
+    """Two workers claiming and retrying simultaneously cannot both process the same item."""
+    store_dir = str(tmp_path / "rq")
+    # Enqueue multiple items
+    for i in range(3):
+        enqueue_failed_write(
+            upload_id=f"u_{i}", course="g9", sheet_id="sid", tab="Tab",
+            cells=[WriteCell(f"User{i}", 2, "C", None, "Present")],
+            store_dir=store_dir,
+        )
+
+    class _WS:
+        def col_values(self, _index):
+            return [""]
+
+        def batch_update(self, updates, value_input_option=None):
+            pass
+
+    monkeypatch.setattr(writer, "_get_client", lambda retry_kw: None)
+    monkeypatch.setattr(writer, "_open_worksheet", lambda *_args: _WS())
+
+    results = []
+    lock = threading.Lock()
+
+    def worker():
+        recovered = retry_pending_writes(store_dir=store_dir)
+        with lock:
+            results.append(recovered)
+
+    # Launch two workers simultaneously
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Total recovered should be exactly 3 (all items), not more due to double-processing
+    assert sum(results) == 3
+    # Queue should be empty
+    rq = ReviewQueue(store_dir=store_dir)
+    assert len(rq.list_pending_writes()) == 0
+
+
+def test_concurrent_review_enqueue_and_resolve_preserve_all_items(tmp_path):
+    """Concurrent enqueue and resolve operations on review items do not lose data."""
+    from attendance.matcher import MatchResult, ReasonCode, Candidate, MatchDecision
+    from attendance.ocr import OcrRow
+
+    store_dir = str(tmp_path / "rq")
+    rq = ReviewQueue(store_dir=store_dir)
+
+    upload_id = "u_concurrent"
+
+    results = []
+    lock = threading.Lock()
+
+    def enqueuer():
+        for i in range(5):
+            ocr_row = OcrRow(
+                raw_name=f"Student{i}",
+                status_mark=None,
+                confidence=0.9,
+                row_index=i,
+                bounding_box=None,
+                photo_index=None,
+            )
+            candidate = Candidate(
+                roster_name=f"Roster{i}",
+                roster_row=i + 1,
+                score=0.8,
+            )
+            match_result = MatchResult(
+                decision=MatchDecision.REVIEW,
+                reason=ReasonCode.MATCH_LOW_SCORE,
+                best=candidate,
+                top3=[candidate],
+                raw_name=f"Student{i}",
+                paper_row_index=i,
+            )
+            item_id = rq.enqueue(
+                upload_id=upload_id,
+                course="g9",
+                session=1,
+                image_ref=f"img{i}.jpg",
+                ocr_row=ocr_row,
+                match_result=match_result,
+                raw_mark=None,
+            )
+            with lock:
+                results.append(("enqueue", item_id))
+
+    def resolver():
+        # Give enqueuer time to add some items
+        import time
+        time.sleep(0.01)
+        for i in range(3):
+            try:
+                # Try to resolve item_{i} if it exists
+                rq.resolve(
+                    upload_id=upload_id,
+                    item_id=f"item_{i}",  # This won't match actual IDs, but tests transaction safety
+                    chosen_roster_row=1,
+                    chosen_roster_name="Test",
+                    attendance_value="Present",
+                )
+            except (KeyError, ValueError):
+                pass  # Item doesn't exist or already resolved, which is fine
+        with lock:
+            results.append(("resolve", None))
+
+    threads = [threading.Thread(target=enqueuer), threading.Thread(target=resolver)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # All enqueued items should be present
+    pending = rq.list_pending(upload_id=upload_id)
+    assert len(pending) == 5
+
+
+def test_stale_write_claim_releases_and_allows_reclaim(tmp_path):
+    """A claim older than the timeout is released back to pending for another worker."""
+    from attendance.review_queue import _Store
+    from datetime import timedelta
+
+    store_dir = str(tmp_path / "rq")
+
+    # Enqueue a failed write
+    enqueue_failed_write(
+        upload_id="u_stale", course="g9", sheet_id="sid", tab="Tab",
+        cells=[WriteCell("Alice", 2, "C", None, "Present")], store_dir=store_dir,
+    )
+
+    # Claim it (simulating a worker starting)
+    store = _Store(Path(store_dir) / "queue.db")
+    claimed = store.claim_pending_writes()
+    assert len(claimed) == 1
+    write_id = claimed[0]["write_id"]
+
+    # Verify the database shows it as processing (returned dict has old status)
+    with sqlite3.connect(str(Path(store_dir) / "queue.db")) as conn:
+        cur = conn.execute("SELECT status FROM pending_writes WHERE write_id = ?", (write_id,))
+        assert cur.fetchone()[0] == "processing"
+
+    # Manually age the claim to be older than the 900-second default timeout
+    old_time = (datetime.datetime.now(datetime.timezone.utc) - timedelta(seconds=1000)).isoformat()
+    with sqlite3.connect(str(Path(store_dir) / "queue.db")) as conn:
+        conn.execute("UPDATE pending_writes SET updated_at = ? WHERE write_id = ?", (old_time, write_id))
+        conn.commit()
+
+    # Release stale claims
+    released = store.release_stale_write_claims(older_than_seconds=900)
+    assert released == 1
+
+    # Verify the item is back to pending
+    pending = store.list_pending_writes()
+    assert len(pending) == 1
+    assert pending[0]["status"] == "pending"
+    assert pending[0]["write_id"] == write_id
+
+    # Verify another worker can now claim it
+    claimed_again = store.claim_pending_writes()
+    assert len(claimed_again) == 1
+    assert claimed_again[0]["write_id"] == write_id
 
 
 def test_install_job_queue():

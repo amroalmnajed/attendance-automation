@@ -72,7 +72,7 @@ _CONFIG_YAML: Path = _REPO_ROOT / "config" / "attendance.yaml"
 
 # The canonical course keys as of the last known good state of attendance.yaml.
 # Used only as a fallback when the YAML cannot be read (e.g. in unit tests).
-_FALLBACK_KEYS: tuple[str, ...] = ("crash", "main", "g9", "g10")
+CONFIG_ERROR: Optional[str] = None
 
 
 def _load_courses() -> dict[str, CourseConfig]:
@@ -81,38 +81,30 @@ def _load_courses() -> dict[str, CourseConfig]:
     Sheet IDs are pulled from ``st.secrets`` / env vars using the convention
     ``{KEY.upper()}_SHEET_ID``, e.g. ``CRASH_SHEET_ID``.
     """
+    global CONFIG_ERROR
     if not _CONFIG_YAML.exists():
-        # Fallback: use known keys so the app starts without the full repo
-        return {
-            key: CourseConfig(
-                key=key,
-                label=key.upper(),
-                sheet_id=_secret(f"{key.upper()}_SHEET_ID"),
-            )
-            for key in _FALLBACK_KEYS
-        }
-
-    with _CONFIG_YAML.open(encoding="utf-8") as fh:
-        raw: dict = yaml.safe_load(fh) or {}
+        CONFIG_ERROR = f"Configuration file not found: {_CONFIG_YAML}"
+        return {}
+    try:
+        with _CONFIG_YAML.open(encoding="utf-8") as fh:
+            raw: dict = yaml.safe_load(fh) or {}
+        course_values = raw.get("attendance", {}).get("courses", {})
+        if not isinstance(course_values, dict):
+            raise ValueError("attendance.courses must be a mapping")
+    except (OSError, yaml.YAMLError, ValueError, AttributeError) as exc:
+        CONFIG_ERROR = f"Unable to load attendance configuration: {exc}"
+        return {}
 
     courses: dict[str, CourseConfig] = {}
-    for key, vals in raw.get("courses", {}).items():
+    for key, vals in course_values.items():
         courses[key] = CourseConfig(
             key=key,
             label=vals.get("name", key) if isinstance(vals, dict) else key,
             sheet_id=_secret(f"{key.upper()}_SHEET_ID"),
         )
 
-    # If YAML had no courses block at all, fall back gracefully
     if not courses:
-        return {
-            key: CourseConfig(
-                key=key,
-                label=key.upper(),
-                sheet_id=_secret(f"{key.upper()}_SHEET_ID"),
-            )
-            for key in _FALLBACK_KEYS
-        }
+        CONFIG_ERROR = "attendance.courses is empty"
 
     return courses
 
@@ -152,33 +144,8 @@ def get_allowed_session_types(course_key: str, session_num: int = 1) -> list[str
             parity = "odd" if int(session_num) % 2 == 1 else "even"
             if parity in types_cfg:
                 return list(types_cfg[parity])
-    except Exception:
-        pass
-
-    if course_key.lower() == "g9":
-        return [
-            "Friday - Center",
-            "Friday - Online",
-            "Saturday - Center",
-            "Saturday - Online",
-        ]
-    if course_key.lower() == "g10":
-        if int(session_num) % 2 == 1:
-            return [
-                "Saturday - Center",
-                "Saturday - Online",
-                "Sunday- Center",
-                "Sunday- Online",
-                "Monday - Online",
-            ]
-        else:
-            return [
-                "Tuesday - Center",
-                "Tuesday  - Online",
-                "Wednesday - Online",
-                "Thursday - Center",
-                "Thursday - Online",
-            ]
+    except (OSError, yaml.YAMLError, TypeError, ValueError):
+        return []
     return []
 
 
@@ -242,12 +209,6 @@ def normalize_session_type(input_str: Optional[str], course_key: str, session_nu
 
 def get_course_meeting_id(course_key: str) -> str:
     """Return the Zoom meeting ID mapped to this course from config."""
-    fallback_map = {
-        "crash": "81887392957",
-        "main": "81795786552",
-        "g10": "83570905451",
-        "g9": "82572049402",
-    }
     try:
         if _CONFIG_YAML.exists():
             with _CONFIG_YAML.open(encoding="utf-8") as fh:
@@ -256,9 +217,9 @@ def get_course_meeting_id(course_key: str) -> str:
             for m_id, c in mappings.items():
                 if str(c).lower() == str(course_key).lower():
                     return str(m_id)
-    except Exception:
-        pass
-    return fallback_map.get(str(course_key).lower(), "")
+    except (OSError, yaml.YAMLError, TypeError, ValueError):
+        return ""
+    return ""
 
 
 _detected_sessions_cache: dict[str, tuple[float, int]] = {}
@@ -368,5 +329,4 @@ def detect_next_session_number(course_key: str, cfg: Optional[dict] = None) -> i
     final_val = detected if (detected and detected > 0) else 1
     _detected_sessions_cache[course_key] = (now, final_val)
     return final_val
-
 

@@ -70,6 +70,13 @@ def test_rows_from_all_photos_are_written_in_one_upload(env, monkeypatch):
     assert "Photos:" in s.text()
 
 
+def test_missing_mark_defaults_to_present(env, monkeypatch):
+    prov = FakeProvider({b"photo-one": [r("Ahmed Hassan Ali", None, 1)]})
+    s = go(env, monkeypatch, prov, env.photos[:1])
+    assert s.matched == 1 and s.flagged == 0 and s.written == 1
+    assert env.ws.updates == [{"range": "E2", "values": [["Present"]]}]
+
+
 def test_same_student_on_two_photos_is_written_once(env, monkeypatch):
     prov = FakeProvider({
         b"photo-one": [r("Ahmed Hassan Ali", "P", 1)],

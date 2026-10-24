@@ -18,6 +18,9 @@ class _WS:
     def __init__(self, fail=None):
         self.reads, self.fail, self.updates = 0, fail, []
 
+    def col_values(self, col_idx):
+        return [""] * 100  # Empty column to allow reconciliation
+
     def get_all_values(self):
         self.reads += 1
         if self.fail:

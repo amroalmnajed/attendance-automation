@@ -88,6 +88,9 @@ class _WS:
         self.failures = list(failures)
         self.calls = 0
 
+    def col_values(self, col_idx):
+        return [""] * 100  # Empty column to allow reconciliation
+
     def batch_update(self, updates, value_input_option=None):
         self.calls += 1
         if self.failures:
@@ -159,6 +162,9 @@ class _SheetWS:
     def __init__(self, failures):
         self.failures = list(failures)
         self.calls = 0
+
+    def col_values(self, col_idx):
+        return [""] * 100  # Empty column to allow reconciliation
 
     def get_all_values(self):
         self.calls += 1

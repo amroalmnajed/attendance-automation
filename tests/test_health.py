@@ -212,6 +212,8 @@ def test_dry_run_upload_ocr_records_nothing_but_real_one_does(cfg, sent):
 
 
 class _WS:
+    def col_values(self, col_idx):
+        return [""] * 100  # Empty column to allow reconciliation
     def batch_update(self, updates, value_input_option=None):
         raise ConnectionError("down")
 

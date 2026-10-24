@@ -144,6 +144,15 @@ class TestCourses:
         for k, v in COURSES.items():
             assert v.key == k
 
+    def test_malformed_yaml_is_visible_not_replaced_with_defaults(self, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import webapp.config as cfg_mod  # noqa: PLC0415
+
+        bad = tmp_path / "attendance.yaml"
+        bad.write_text("attendance: [broken", encoding="utf-8")
+        monkeypatch.setattr(cfg_mod, "_CONFIG_YAML", bad)
+        assert cfg_mod._load_courses() == {}
+        assert cfg_mod.CONFIG_ERROR and "Unable to load" in cfg_mod.CONFIG_ERROR
+
 
 # ---------------------------------------------------------------------------
 # CONFIG_PATH tests

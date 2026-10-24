@@ -45,6 +45,40 @@ class WriteResult:
     dry_run: bool
 
 
+def _normalise_cell_value(value: object) -> str:
+    """Comparison form for Sheets values; empty and whitespace-only are equivalent."""
+    return "" if value is None else str(value).strip()
+
+
+def reconcile_cells(ws, cells: list[WriteCell]) -> tuple[list[WriteCell], list[WriteCell], list[WriteCell]]:
+    """Re-read cells and split them into safe, already-applied and conflicting writes.
+
+    A write is safe only when the live cell is still the value observed by the
+    caller.  This is deliberately shared by normal writes and replayed writes
+    so a delayed retry cannot overwrite a later manual correction.
+    """
+    values_by_col: dict[str, list[object]] = {}
+    for col in {cell.col for cell in cells}:
+        values_by_col[col] = ws.col_values(_col_letter_to_index(col))
+
+    safe: list[WriteCell] = []
+    already_applied: list[WriteCell] = []
+    conflicts: list[WriteCell] = []
+    for cell in cells:
+        values = values_by_col[cell.col]
+        current = values[cell.sheet_row - 1] if 1 <= cell.sheet_row <= len(values) else ""
+        current_value = _normalise_cell_value(current)
+        expected_old = _normalise_cell_value(cell.old_value)
+        intended = _normalise_cell_value(cell.new_value)
+        if current_value == intended:
+            already_applied.append(cell)
+        elif current_value == expected_old:
+            safe.append(cell)
+        else:
+            conflicts.append(cell)
+    return safe, already_applied, conflicts
+
+
 # ─── Retry logic ──────────────────────────────────────────────────────────────
 
 def _with_backoff(
@@ -212,17 +246,26 @@ def batch_write(
                 log.error("enqueue_failed_write_error", extra={"error": str(enq_exc)})
         raise
 
-    updates: list[dict] = []
+    safe_cells, already_applied, conflicts = reconcile_cells(ws, cells)
+    skipped.extend(already_applied)
+    if conflicts:
+        try:
+            from attendance.review_queue import ReviewQueue
+            ReviewQueue(store_dir=store_dir).enqueue_write_conflict(
+                upload_id=upload_id,
+                course=getattr(session, "course", "unknown"),
+                sheet_id=getattr(session, "sheet_id", "unknown"),
+                tab=getattr(session, "tab", "unknown"),
+                cells=conflicts,
+                last_error="Target cells changed after validation; manual review required.",
+            )
+        except Exception as exc:
+            log.error("enqueue_write_conflict_error", extra={"error": str(exc)})
+            raise RuntimeError("Refusing to overwrite changed cells and could not record the conflict") from exc
+        log.warning("write_conflicts_detected", extra={"upload_id": upload_id, "count": len(conflicts)})
 
-    for cell in cells:
-        if cell.old_value and cell.old_value.strip() == cell.new_value:
-            skipped.append(cell)
-            continue  # idempotent no-op
-
-        # A1 notation: e.g. "E7"
-        a1 = f"{cell.col}{cell.sheet_row}"
-        updates.append({"range": f"{a1}", "values": [[cell.new_value]]})
-        written.append(cell)
+    updates = [{"range": f"{cell.col}{cell.sheet_row}", "values": [[cell.new_value]]} for cell in safe_cells]
+    written.extend(safe_cells)
 
     if updates:
         def _do_update():
@@ -239,7 +282,7 @@ def batch_write(
                     course=getattr(session, "course", "unknown"),
                     sheet_id=getattr(session, "sheet_id", "unknown"),
                     tab=getattr(session, "tab", "unknown"),
-                    cells=written,
+                    cells=safe_cells,
                     last_error=str(exc)[:300],
                     store_dir=store_dir,
                 )
@@ -285,7 +328,7 @@ def _print_diff(cells: list[WriteCell], dry_run: bool) -> None:
     for c in cells:
         old_disp = (c.old_value or "").strip() or "(empty)"
         same = old_disp.lower() == c.new_value.lower()
-        marker = "=" if same else "←"
+        marker = "=" if same else "<"
         print(
             f"  {c.sheet_row:>5}  {c.col:>4}  {c.roster_name:<30}  "
             f"{old_disp:>14}  {c.new_value:<14}  {marker}"
@@ -324,7 +367,7 @@ def retry_pending_writes(store_dir: str = "review_queue", cfg: Optional[dict] = 
     """Process pending failed writes from SQLite. Returns count of recovered batches."""
     from attendance.review_queue import ReviewQueue
     rq = ReviewQueue(store_dir=store_dir)
-    pending = rq.list_pending_writes()
+    pending = rq.claim_pending_writes()
     if not pending:
         return 0
 
@@ -349,15 +392,26 @@ def retry_pending_writes(store_dir: str = "review_queue", cfg: Optional[dict] = 
             )
             for c in item.get("cells", [])
         ]
-        updates = [{"range": f"{c.col}{c.sheet_row}", "values": [[c.new_value]]} for c in cells]
-
         try:
             ws = _open_worksheet(gc, sheet_id, tab, retry_kw)
-            ws.batch_update(updates, value_input_option="USER_ENTERED")
+            safe_cells, already_applied, conflicts = reconcile_cells(ws, cells)
+            if conflicts:
+                rq.enqueue_write_conflict(
+                    upload_id=item["upload_id"],
+                    course=item["course"],
+                    sheet_id=sheet_id,
+                    tab=tab,
+                    cells=conflicts,
+                    last_error="Target cells changed after the original write failed; manual review required.",
+                )
+            updates = [{"range": f"{c.col}{c.sheet_row}", "values": [[c.new_value]]} for c in safe_cells]
+            if updates:
+                ws.batch_update(updates, value_input_option="USER_ENTERED")
             rq.mark_write_success(write_id)
-            invalidate_session_cache()
+            if updates:
+                invalidate_session_cache()
             succeeded += 1
-            for c in cells:
+            for c in safe_cells:
                 audit_write(
                     upload_id=item["upload_id"],
                     course=item["course"],
@@ -368,7 +422,10 @@ def retry_pending_writes(store_dir: str = "review_queue", cfg: Optional[dict] = 
                     new_value=c.new_value,
                     dry_run=False,
                 )
-            log.info("pending_write_recovered", extra={"write_id": write_id, "upload_id": item["upload_id"]})
+            log.info(
+                "pending_write_recovered",
+                extra={"write_id": write_id, "upload_id": item["upload_id"], "skipped": len(already_applied), "conflicts": len(conflicts)},
+            )
         except Exception as exc:
             rq.mark_write_failure(write_id, str(exc))
             log.warning("pending_write_retry_failed", extra={"write_id": write_id, "error": str(exc)[:200]})

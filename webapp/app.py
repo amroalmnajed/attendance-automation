@@ -32,7 +32,7 @@ from webapp.runtime import configure_runtime_secrets  # noqa: E402
 configure_runtime_secrets(st)
 
 from webapp.auth import require_login  # noqa: E402
-from webapp.config import COURSES  # noqa: E402
+from webapp.config import CONFIG_ERROR, COURSES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants & Navigation
@@ -137,6 +137,9 @@ _PAGE_RENDERERS: dict[str, object] = {
 
 def main() -> None:
     if not require_login():
+        return
+    if CONFIG_ERROR:
+        st.error(f"Configuration unavailable: {CONFIG_ERROR}")
         return
     page_key = _render_sidebar()
     renderer = _PAGE_RENDERERS.get(page_key, _page_upload)
