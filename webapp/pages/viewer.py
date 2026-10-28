@@ -121,7 +121,7 @@ def _render_session_viewer(course_key: str, course_label: str, cfg: dict, review
         return
 
     # Display as table
-    st.dataframe(attendance_data, use_container_width=True)
+    st.dataframe(attendance_data, width='stretch')
 
     # Summary metrics
     st.subheader("Summary Metrics")

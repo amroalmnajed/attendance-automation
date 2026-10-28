@@ -98,7 +98,7 @@ def _render_revert() -> None:
             "Status": status,
         })
 
-    st.dataframe(table_data, use_container_width=True)
+    st.dataframe(table_data, width='stretch')
 
     if has_overwritten:
         st.warning("⚠️ Some cells have been overwritten by newer uploads. Reverting will overwrite their current values.")
@@ -234,7 +234,7 @@ def _render_aliases() -> None:
             }
             for e in entries
         ]
-        st.dataframe(table, use_container_width=True)
+        st.dataframe(table, width='stretch')
 
         st.divider()
         st.subheader("Remove an Alias")

@@ -150,7 +150,7 @@ def _page_upload() -> None:
         st.info("Upload one or more photos to begin.")
         return
 
-    if st.button("Process", type="primary", use_container_width=True):
+    if st.button("Process", type="primary", width='stretch'):
         # Keep files available to the review queue for the lifetime of this runtime.
         # Community Cloud local storage is ephemeral; see webapp/DEPLOY.md.
         review_images_dir = Path("review_images")

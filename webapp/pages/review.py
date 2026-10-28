@@ -138,7 +138,7 @@ def _render_review_item(
 
         if crop_bytes:
             caption_text = "Flagged row (cropped)" if bbox else "Photo reference"
-            st.image(crop_bytes, caption=caption_text, use_container_width=True)
+            st.image(crop_bytes, caption=caption_text)
         else:
             st.info("Could not load image preview")
     else:

@@ -39,6 +39,7 @@ from webapp.config import CONFIG_ERROR, COURSES  # noqa: E402
 # ---------------------------------------------------------------------------
 # Page registry: display label → internal key
 _PAGES: dict[str, str] = {
+    "📊 Dashboard": "dashboard",
     "📤 Upload Photos": "upload",
     "✏️ Paste Names": "names",
     "🎦 Zoom": "zoom",
@@ -57,7 +58,7 @@ def _render_sidebar() -> str:
     with st.sidebar:
         st.markdown("## 📋 Attendance Manager")
         st.caption(f"Signed in as {st.session_state.get('user_name', 'webapp-user')}")
-        if st.button("Sign out", use_container_width=True):
+        if st.button("Sign out", width='stretch'):
             st.session_state.clear()
             st.rerun()
 
@@ -91,6 +92,11 @@ def _render_sidebar() -> str:
 # Page renderers
 # ---------------------------------------------------------------------------
 
+def _page_dashboard() -> None:
+    from webapp.pages.dashboard import _page_dashboard as render_dashboard
+    render_dashboard()
+
+
 def _page_upload() -> None:
     from webapp.pages.upload import _page_upload as render_upload
     render_upload()
@@ -122,6 +128,7 @@ def _page_admin() -> None:
 
 
 _PAGE_RENDERERS: dict[str, object] = {
+    "dashboard": _page_dashboard,
     "upload": _page_upload,
     "names": _page_names,
     "zoom": _page_zoom,

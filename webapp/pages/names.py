@@ -145,13 +145,13 @@ def _page_names() -> None:
     if require_confirm:
         col1, col2 = st.columns([1, 1])
         with col1:
-            if st.button("✅ Process anyway", type="primary", use_container_width=True):
+            if st.button("✅ Process anyway", type="primary", width='stretch'):
                 _process_names(parsed, course_key, int(session_num), resolved_type, dry_run)
         with col2:
-            if st.button("✏️ Fix input", use_container_width=True):
+            if st.button("✏️ Fix input", width='stretch'):
                 st.rerun()
     else:
-        if st.button("✅ Process", type="primary", use_container_width=True):
+        if st.button("✅ Process", type="primary", width='stretch'):
             _process_names(parsed, course_key, int(session_num), resolved_type, dry_run)
 
 

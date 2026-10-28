@@ -1,0 +1,103 @@
+/* Custom CSS for Attendance Manager webapp */
+
+/* Design tokens - will be overridden by Streamlit theme where possible */
+:root {
+  --color-primary: #2563eb;
+  --color-primary-soft: #dbeafe;
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+  --color-warning: #ca8a04;
+  --color-warning-soft: #fef9c3;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fee2e2;
+  --color-text-muted: #64748b;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+}
+
+/* Metric cards styling */
+div[data-testid="stMetric"] {
+  background-color: white;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* Button styling improvements */
+.stButton > button {
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.stButton > button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Container improvements */
+div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] {
+  gap: 1rem;
+}
+
+/* Status-like elements for review queue */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status-chip-success {
+  background-color: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.status-chip-warning {
+  background-color: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.status-chip-danger {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+/* Quick action cards */
+.quick-action-card {
+  background-color: white;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  text-align: center;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.quick-action-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+}
+
+/* Section containers */
+.section-container {
+  background-color: white;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* Table improvements */
+[data-testid="stTable"] {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* Info/warning/success boxes */
+[data-testid="stInfo"], [data-testid="stWarning"], [data-testid="stSuccess"] {
+  border-radius: var(--radius-sm);
+}

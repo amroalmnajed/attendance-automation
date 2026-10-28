@@ -147,7 +147,7 @@ def _page_zoom() -> None:
     if last_summary:
         st.divider()
         render_summary(last_summary)
-        if st.button("Clear results", use_container_width=True):
+        if st.button("Clear results", width='stretch'):
             st.session_state.pop("zoom_last_summary", None)
             st.session_state.pop("zoom_prompt", None)
             st.session_state.pop("zoom_req", None)
@@ -221,7 +221,7 @@ def _render_api_fetch_method(
         meeting_date = st.date_input("Meeting date", value=date.today())
         selected_date_str = meeting_date.isoformat()
 
-    if st.button("Fetch & Process Attendance", type="primary", use_container_width=True):
+    if st.button("Fetch & Process Attendance", type="primary", width='stretch'):
         source = {
             "meeting_id": meeting_id,
             "instance_uuid": selected_instance_uuid,
@@ -288,7 +288,7 @@ def _render_csv_upload_method(
                 target_csv_path = tmp.name
             st.session_state["zoom_csv_temp_path"] = target_csv_path
 
-    if st.button("Process CSV", type="primary", use_container_width=True):
+    if st.button("Process CSV", type="primary", width='stretch'):
         if not target_csv_path:
             st.error("Please select or upload a CSV file.")
             return
@@ -319,7 +319,7 @@ def _render_prompt_resolution(prompt: dict, req: dict) -> None:
         )
         col1, col2 = st.columns([1, 1])
         with col1:
-            if st.button("Retry with manual time", type="primary", use_container_width=True):
+            if st.button("Retry with manual time", type="primary", width='stretch'):
                 if manual_start_time.strip():
                     _execute_zoom_run(
                         req=req,
@@ -328,7 +328,7 @@ def _render_prompt_resolution(prompt: dict, req: dict) -> None:
                 else:
                     st.error("Please enter a manual start time.")
         with col2:
-            if st.button("Cancel", use_container_width=True):
+            if st.button("Cancel", width='stretch'):
                 _reset_zoom_state()
                 st.rerun()
 
@@ -350,13 +350,13 @@ def _render_prompt_resolution(prompt: dict, req: dict) -> None:
         )
         col1, col2 = st.columns([1, 1])
         with col1:
-            if st.button("Retry with session type", type="primary", use_container_width=True):
+            if st.button("Retry with session type", type="primary", width='stretch'):
                 _execute_zoom_run(
                     req=req,
                     explicit_session_type=explicit_session_type,
                 )
         with col2:
-            if st.button("Cancel", use_container_width=True):
+            if st.button("Cancel", width='stretch'):
                 _reset_zoom_state()
                 st.rerun()
 
