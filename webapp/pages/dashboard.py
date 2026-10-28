@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import streamlit as st
@@ -23,6 +24,23 @@ def _load_config() -> dict:
             return yaml.safe_load(f) or {}
     except FileNotFoundError:
         return {}
+
+
+def _navigate_to_upload():
+    st.session_state["_nav"] = "📤 Upload Photos"
+
+def _navigate_to_names():
+    st.session_state["_nav"] = "✏️ Paste Names"
+
+def _navigate_to_zoom():
+    st.session_state["_nav"] = "🎦 Zoom"
+
+def _navigate_to_review():
+    st.session_state["_nav"] = "🔍 Review Queue"
+
+def _navigate_to_review_with_upload(upload_id: str):
+    st.session_state["last_upload_id"] = upload_id
+    st.session_state["_nav"] = "🔍 Review Queue"
 
 
 def _page_dashboard() -> None:
@@ -87,24 +105,16 @@ def _page_dashboard() -> None:
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        if st.button("📤 Upload Photos", width='stretch'):
-            st.session_state["_nav"] = "📤 Upload Photos"
-            st.rerun()
+        st.button("📤 Upload Photos", width='stretch', on_click=_navigate_to_upload)
 
     with col2:
-        if st.button("✏️ Paste Names", width='stretch'):
-            st.session_state["_nav"] = "✏️ Paste Names"
-            st.rerun()
+        st.button("✏️ Paste Names", width='stretch', on_click=_navigate_to_names)
 
     with col3:
-        if st.button("🎦 Zoom", width='stretch'):
-            st.session_state["_nav"] = "🎦 Zoom"
-            st.rerun()
+        st.button("🎦 Zoom", width='stretch', on_click=_navigate_to_zoom)
 
     with col4:
-        if st.button("🔍 Review Queue", width='stretch'):
-            st.session_state["_nav"] = "🔍 Review Queue"
-            st.rerun()
+        st.button("🔍 Review Queue", width='stretch', on_click=_navigate_to_review)
 
     st.divider()
 
@@ -137,10 +147,8 @@ def _page_dashboard() -> None:
                         st.caption(f"Upload: {upload_id[:8]}...")
 
                 with col3:
-                    if st.button("Review", key=f"review_preview_{i}", width='stretch'):
-                        st.session_state["last_upload_id"] = upload_id
-                        st.session_state["_nav"] = "🔍 Review Queue"
-                        st.rerun()
+                    st.button("Review", key=f"review_preview_{i}", width='stretch',
+                             on_click=partial(_navigate_to_review_with_upload, upload_id))
 
                 if i < len(preview_items) - 1:
                     st.divider()
@@ -148,9 +156,7 @@ def _page_dashboard() -> None:
         if total_pending > 5:
             st.caption(f"... and {total_pending - 5} more items")
 
-        if st.button("View All Review Items", width='stretch'):
-            st.session_state["_nav"] = "🔍 Review Queue"
-            st.rerun()
+        st.button("View All Review Items", width='stretch', on_click=_navigate_to_review)
     else:
         st.success("✅ No items in review queue")
 
