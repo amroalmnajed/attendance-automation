@@ -25,19 +25,155 @@ from attendance import aliases as aliases_mod
 from attendance import absent as absent_mod
 from attendance import history as history_mod
 from attendance.aliases import AliasStore
+from attendance.concurrent import ConcurrentProcessor, ThreadSafeMatcher, create_processor, create_thread_safe_matcher
 from attendance.gates import check_all_gates
 from attendance.matcher import MatchDecision, MatchResult, ReasonCode, build_matcher
 from attendance.ocr import OcrRow
+from attendance.roles import has_permission
 from attendance.session_resolver import resolve
 from attendance.review_queue import ReviewQueue
 from attendance.session_resolver import SheetSession, resolve
 from attendance.utils.column_utils import col_letter_to_index
 from attendance.utils.progress import ProgressFn, STAGE_MATCHING, STAGE_SAVING, _emit
-from attendance.writer import WriteCell, batch_write
+from attendance.writer import WriteCell, batch_write, batch_write_two_phase
 from attendance.marks import normalize_attendance_mark
 from core.logger import get_logger
 
 log = get_logger("row_processor")
+
+
+def _process_ocr_row(
+    ocr_row: OcrRow,
+    matcher: any,
+    session_info: SheetSession,
+    course: str,
+    session_num: int,
+    session_type: Optional[str],
+    min_conf: float,
+    upload_id: str,
+    image_path: str,
+    review_queue: ReviewQueue,
+    summary: any,
+    col_data: list[str],
+    session_col: str,
+    type_col: Optional[str],
+    allowed_attendance: list[str],
+    force: bool,
+    ws: any,
+) -> tuple[Optional[WriteCell], Optional[WriteCell], set[int]]:
+    """Process a single OCR row and return cells to write.
+
+    Returns:
+        Tuple of (attendance_cell, type_cell, candidate_rows)
+    """
+    candidate_rows = set()
+    cells_to_write = []
+    NOISE_WORDS = {"name", "student", "student name", "الاسم", "اسم", "اسم الطالب", "م"}
+    MIN_CHARS = 2
+
+    raw_stripped = ocr_row.raw_name.strip()
+    raw_clean = raw_stripped.lower()
+    if not raw_clean or len(raw_stripped) < MIN_CHARS or raw_clean in NOISE_WORDS:
+        return None, None, candidate_rows
+
+    match_result = matcher.match(
+        raw_name=ocr_row.raw_name,
+        ocr_confidence=ocr_row.confidence,
+        roster=session_info.roster,
+        paper_row_index=ocr_row.row_index,
+        min_confidence=min_conf,
+        ocr_suggested_name=ocr_row.matched_roster_name,
+        ocr_suggested_confidence=ocr_row.confidence,
+    )
+
+    if ocr_row.conflict_marks:
+        _note_candidates(match_result, candidate_rows)
+        review_queue.enqueue(
+            upload_id=upload_id,
+            course=course,
+            session=session_num,
+            image_ref=ocr_row.source_image or image_path,
+            ocr_row=ocr_row,
+            match_result=match_result,
+            raw_mark=" / ".join(ocr_row.conflict_marks),
+            session_type=session_type,
+            reason=ReasonCode.PHOTO_MARK_CONFLICT,
+        )
+        summary.flagged += 1
+        return None, None, candidate_rows
+
+    if match_result.decision != MatchDecision.AUTO_ACCEPT:
+        _note_candidates(match_result, candidate_rows)
+        review_queue.enqueue(
+            upload_id=upload_id,
+            course=course,
+            session=session_num,
+            image_ref=ocr_row.source_image or image_path,
+            ocr_row=ocr_row,
+            match_result=match_result,
+            raw_mark=ocr_row.status_mark,
+            session_type=session_type,
+        )
+        summary.flagged += 1
+        return None, None, candidate_rows
+
+    raw_mark = ocr_row.status_mark or "Present"
+    canonical = normalize_attendance_mark(raw_mark)
+
+    roster_row = match_result.best.roster_row
+    if roster_row <= 0 or roster_row > len(col_data):
+        current = ""
+    else:
+        current = col_data[roster_row - 1]
+
+    gate = check_all_gates(
+        match_result=match_result,
+        raw_mark=raw_mark,
+        allowed_attendance=allowed_attendance,
+        current_cell_value=current,
+        force=force,
+    )
+
+    if not gate.passed:
+        _note_candidates(match_result, candidate_rows)
+        review_queue.enqueue(
+            upload_id=upload_id,
+            course=course,
+            session=session_num,
+            image_ref=ocr_row.source_image or image_path,
+            ocr_row=ocr_row,
+            match_result=match_result,
+            raw_mark=raw_mark,
+            session_type=session_type,
+            reason=gate.reason,
+        )
+        summary.flagged += 1
+        return None, None, candidate_rows
+
+    summary.matched += 1
+
+    attendance_cell = WriteCell(
+        roster_name=match_result.best.roster_name,
+        sheet_row=roster_row,
+        col=session_col,
+        old_value=current or None,
+        new_value=gate.canonical_value,
+    )
+
+    type_cell = None
+    if type_col and session_type:
+        type_current_data = ws.col_values(col_letter_to_index(type_col))
+        type_current = type_current_data[roster_row - 1] if roster_row <= len(type_current_data) else ""
+        if not type_current.strip() or force:
+            type_cell = WriteCell(
+                roster_name=match_result.best.roster_name,
+                sheet_row=roster_row,
+                col=type_col,
+                old_value=type_current or None,
+                new_value=session_type,
+            )
+
+    return attendance_cell, type_cell, candidate_rows
 
 
 def _note_candidates(match_result: MatchResult, candidate_rows: set[int]) -> None:
@@ -66,6 +202,7 @@ def process_rows(
     session_info: Optional[SheetSession] = None,
     progress: Optional[ProgressFn] = None,
     match_cfg_overrides: Optional[dict] = None,
+    resolved_by: Optional[str] = None,
 ):
     """Process OCR rows: match, gate, write, and track attendance.
 
@@ -76,6 +213,7 @@ def process_rows(
     # touching the global config.  Overrides are merged on top of the base config.
     match_cfg = {**att_cfg.get("match", {}), **(match_cfg_overrides or {})}
     write_cfg = att_cfg.get("write", {})
+    concurrency_cfg = att_cfg.get("concurrency", {})
 
     if session_info is None:
         session_info = resolve(
@@ -88,6 +226,16 @@ def process_rows(
     ws = session_info.get_worksheet()
     summary.sheet_url = f"https://docs.google.com/spreadsheets/d/{session_info.sheet_id}/edit#gid={ws.id}"
 
+    # Permission check: ensure caller has edit_attendance permission for this course
+    if resolved_by and not dry_run:
+        if not has_permission(resolved_by, "edit_attendance", cfg, course=course):
+            log.warning(
+                "permission_denied",
+                extra={"upload_id": upload_id, "user": resolved_by, "course": course, "permission": "edit_attendance"},
+            )
+            summary.errors.append(f"Permission denied: user '{resolved_by}' does not have edit_attendance permission for course '{course}'")
+            return summary
+
     col_range = f"{session_info.session_col}:{session_info.session_col}"
     col_data = ws.col_values(col_letter_to_index(session_info.session_col))
 
@@ -96,123 +244,107 @@ def process_rows(
         min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
     ) if match_cfg.get("learn_aliases", True) else None
 
-    matcher = build_matcher(
-        match_cfg,
-        alias_lookup=(lambda name: alias_store.lookup(course, name)) if alias_store else None,
-    )
+    # Use concurrent processing if configured with max_workers > 1
+    max_workers = int(concurrency_cfg.get("max_workers", 1))
+    use_concurrent = max_workers > 1
+
+    if use_concurrent:
+        matcher = create_thread_safe_matcher(
+            match_cfg,
+            alias_lookup=(lambda name: alias_store.lookup(course, name)) if alias_store else None,
+        )
+        processor = create_processor(cfg)
+    else:
+        matcher = build_matcher(
+            match_cfg,
+            alias_lookup=(lambda name: alias_store.lookup(course, name)) if alias_store else None,
+        )
+        processor = None
+
     matcher.reset()
     review_queue = ReviewQueue(store_dir=review_store_dir)
 
     cells_to_write: list[WriteCell] = []
     matched_rows: set[int] = set()       # roster rows accepted from this upload
     candidate_rows: set[int] = set()     # roster rows that flagged items might refer to
-    NOISE_WORDS = {"name", "student", "student name", "الاسم", "اسم", "اسم الطالب", "م"}
-    MIN_CHARS = 2
 
     _emit(progress, STAGE_MATCHING)
-    for ocr_row in ocr_rows:
-        raw_stripped = ocr_row.raw_name.strip()
-        raw_clean = raw_stripped.lower()
-        if not raw_clean or len(raw_stripped) < MIN_CHARS or raw_clean in NOISE_WORDS:
-            continue
 
-        match_result = matcher.match(
-            raw_name=ocr_row.raw_name,
-            ocr_confidence=ocr_row.confidence,
-            roster=session_info.roster,
-            paper_row_index=ocr_row.row_index,
-            min_confidence=min_conf,
-            ocr_suggested_name=ocr_row.matched_roster_name,
-            ocr_suggested_confidence=ocr_row.confidence,
-        )
-
-        if ocr_row.conflict_marks:
-            # Same name on 2+ photos with different marks: never guess, a human decides.
-            _note_candidates(match_result, candidate_rows)
-            review_queue.enqueue(
-                upload_id=upload_id,
-                course=course,
-                session=session_num,
-                image_ref=ocr_row.source_image or image_path,
+    if use_concurrent and processor:
+        # Process rows concurrently
+        def match_row(ocr_row: OcrRow) -> tuple[Optional[WriteCell], Optional[WriteCell], set[int]]:
+            return _process_ocr_row(
                 ocr_row=ocr_row,
-                match_result=match_result,
-                raw_mark=" / ".join(ocr_row.conflict_marks),
-                session_type=session_type,
-                reason=ReasonCode.PHOTO_MARK_CONFLICT,
-            )
-            summary.flagged += 1
-            continue
-
-        if match_result.decision != MatchDecision.AUTO_ACCEPT:
-            _note_candidates(match_result, candidate_rows)
-            review_queue.enqueue(
-                upload_id=upload_id,
+                matcher=matcher,
+                session_info=session_info,
                 course=course,
-                session=session_num,
-                image_ref=ocr_row.source_image or image_path,
-                ocr_row=ocr_row,
-                match_result=match_result,
-                raw_mark=ocr_row.status_mark,
+                session_num=session_num,
                 session_type=session_type,
-            )
-            summary.flagged += 1
-            continue
-
-        raw_mark = ocr_row.status_mark or "Present"
-        canonical = normalize_attendance_mark(raw_mark)
-
-        roster_row = match_result.best.roster_row
-        if roster_row <= 0 or roster_row > len(col_data):
-            current = ""
-        else:
-            current = col_data[roster_row - 1]
-
-        gate = check_all_gates(
-            match_result=match_result,
-            raw_mark=raw_mark,
-            allowed_attendance=session_info.allowed_attendance,
-            current_cell_value=current,
-            force=force,
-        )
-
-        if not gate.passed:
-            _note_candidates(match_result, candidate_rows)
-            review_queue.enqueue(
+                min_conf=min_conf,
                 upload_id=upload_id,
-                course=course,
-                session=session_num,
-                image_ref=ocr_row.source_image or image_path,
-                ocr_row=ocr_row,
-                match_result=match_result,
-                raw_mark=raw_mark,
-                session_type=session_type,
-                reason=gate.reason,
+                image_path=image_path,
+                review_queue=review_queue,
+                summary=summary,
+                col_data=col_data,
+                session_col=session_info.session_col,
+                type_col=session_info.type_col,
+                allowed_attendance=session_info.allowed_attendance,
+                force=force,
+                ws=ws,
             )
-            summary.flagged += 1
-            continue
 
-        summary.matched += 1
-        matched_rows.add(roster_row)
+        results = processor.process_ocr_rows(ocr_rows, match_row)
 
-        cells_to_write.append(WriteCell(
-            roster_name=match_result.best.roster_name,
-            sheet_row=roster_row,
-            col=session_info.session_col,
-            old_value=current or None,
-            new_value=gate.canonical_value,
-        ))
+        for ocr_row, (attendance_cell, type_cell, row_candidates), error in results:
+            if error:
+                log.error(
+                    "ocr_row_failed",
+                    extra={"upload_id": upload_id, "row": ocr_row.row_index, "error": str(error)},
+                )
+                continue
 
-        if session_info.type_col and session_type:
-            type_current_data = ws.col_values(col_letter_to_index(session_info.type_col))
-            type_current = type_current_data[roster_row - 1] if roster_row <= len(type_current_data) else ""
-            if not type_current.strip() or force:
-                cells_to_write.append(WriteCell(
-                    roster_name=match_result.best.roster_name,
-                    sheet_row=roster_row,
-                    col=session_info.type_col,
-                    old_value=type_current or None,
-                    new_value=session_type,
-                ))
+            candidate_rows.update(row_candidates)
+
+            if attendance_cell:
+                cells_to_write.append(attendance_cell)
+                matched_rows.add(attendance_cell.sheet_row)
+
+            if type_cell:
+                cells_to_write.append(type_cell)
+    else:
+        # Process rows sequentially (original behavior)
+        NOISE_WORDS = {"name", "student", "student name", "الاسم", "اسم", "اسم الطالب", "م"}
+        MIN_CHARS = 2
+
+        for ocr_row in ocr_rows:
+            attendance_cell, type_cell, row_candidates = _process_ocr_row(
+                ocr_row=ocr_row,
+                matcher=matcher,
+                session_info=session_info,
+                course=course,
+                session_num=session_num,
+                session_type=session_type,
+                min_conf=min_conf,
+                upload_id=upload_id,
+                image_path=image_path,
+                review_queue=review_queue,
+                summary=summary,
+                col_data=col_data,
+                session_col=session_info.session_col,
+                type_col=session_info.type_col,
+                allowed_attendance=session_info.allowed_attendance,
+                force=force,
+                ws=ws,
+            )
+
+            candidate_rows.update(row_candidates)
+
+            if attendance_cell:
+                cells_to_write.append(attendance_cell)
+                matched_rows.add(attendance_cell.sheet_row)
+
+            if type_cell:
+                cells_to_write.append(type_cell)
 
     if ocr_rows and all(not r.status_mark for r in ocr_rows):
         msg = "OCR returned no attendance marks for any row; defaulted every row to 'Present'. Verify the sheet."
@@ -220,13 +352,26 @@ def process_rows(
         summary.errors.append(msg)
 
     _emit(progress, STAGE_SAVING)
-    write_result = batch_write(
-        session_info,
-        cells_to_write,
-        upload_id=upload_id,
-        dry_run=dry_run,
-        retry_cfg=write_cfg.get("retry", {}),
-    )
+    # Use two-phase commit if configured
+    if write_cfg.get("two_phase", False):
+        write_result = batch_write_two_phase(
+            session_info,
+            cells_to_write,
+            upload_id=upload_id,
+            dry_run=dry_run,
+            retry_cfg=write_cfg.get("retry", {}),
+            store_dir=review_store_dir,
+            resolved_by=resolved_by,
+        )
+    else:
+        write_result = batch_write(
+            session_info,
+            cells_to_write,
+            upload_id=upload_id,
+            dry_run=dry_run,
+            retry_cfg=write_cfg.get("retry", {}),
+            resolved_by=resolved_by,
+        )
 
     summary.written = len(write_result.written)
     summary.unmatched = max(0, len(ocr_rows) - summary.matched - summary.flagged)

@@ -10,8 +10,10 @@ from typing import Any, Optional, Protocol
 
 from attendance import variants
 from attendance.aliases import AliasStore
+from attendance.audit import log_resolve_item
 from attendance.normalizer import canonical_mark
 from attendance.review_queue import ReviewQueue
+from attendance.roles import has_permission
 from attendance.session_resolver import SheetSession, resolve as session_resolve
 from attendance.writer import WriteCell, batch_write
 from core.logger import get_logger
@@ -52,7 +54,9 @@ def resolve_item(
     *,
     attendance_value: Optional[str] = None,
     roster_name: Optional[str] = None,
+    corrected_raw_name: Optional[str] = None,
     resolved_by: str = "unknown",
+    user_id: Optional[int] = None,
 ) -> ResolveResult:
     """Resolve a review queue item: write to sheet, learn alias, mark resolved.
 
@@ -68,7 +72,9 @@ def resolve_item(
         attendance_value: Canonical attendance value (e.g. "Present"). If omitted,
             derived from item's raw_mark.
         roster_name: Roster name to write/learn. If omitted, looked up in item's top3.
+        corrected_raw_name: User-corrected OCR text (for learning corrections).
         resolved_by: Identifier ("cli" or "telegram").
+        user_id: User ID for permission checking (Telegram ID or system user ID).
 
     Returns:
         ResolveResult indicating success, written, alias_learned, and optional error.
@@ -76,6 +82,26 @@ def resolve_item(
     if cfg is None:
         from attendance.config_runtime import _load_cfg
         cfg = _load_cfg()
+
+    # Check permission unless in dry-run mode or no user_id provided
+    if not dry_run and user_id is not None:
+        # Fetch item first to get course for permission check
+        item = queue.get(upload_id, item_id)
+        if item is None:
+            for cand in queue.list_pending(upload_id) or queue._load(upload_id).get("items", []):
+                if cand.get("item_id", "").startswith(item_id):
+                    item = cand
+                    break
+
+        if item is not None:
+            course = item.get("course")
+            if not has_permission(user_id, "edit_attendance", cfg, course=course):
+                return ResolveResult(
+                    success=False,
+                    written=False,
+                    alias_learned=False,
+                    error="Permission denied: edit_attendance required for this course",
+                )
 
     # 1. Fetch item from queue
     item = queue.get(upload_id, item_id)
@@ -163,6 +189,7 @@ def resolve_item(
                 upload_id=upload_id,
                 dry_run=dry_run,
                 retry_cfg=retry_cfg,
+                resolved_by=resolved_by,
             )
         except Exception as exc:
             log.error("resolve_item_write_failed", extra={"upload_id": upload_id, "item_id": item_id, "error": str(exc)})
@@ -193,10 +220,21 @@ def resolve_item(
                 )
             learn_fn = getattr(alias_store, "learn", getattr(alias_store, "add", None))
             if learn_fn:
-                learn_fn(item["course"], item["raw_name"], roster_name)
+                # Use corrected raw name if provided, otherwise original
+                learn_raw = corrected_raw_name or item["raw_name"]
+                learn_fn(item["course"], learn_raw, roster_name)
                 alias_learned = True
 
-        variants.record_resolution(cfg, item["course"], item["raw_name"], roster_name)
+        raw_for_learning = corrected_raw_name or item["raw_name"]
+        variants.record_resolution(cfg, item["course"], raw_for_learning, roster_name)
+
+        # Record OCR correction if the roster name differs from raw OCR name
+        raw_name = corrected_raw_name or item.get("raw_name", "")
+        if raw_name and roster_name and raw_name != roster_name:
+            from attendance.ocr_corrections import get_correction_engine
+            correction_engine = get_correction_engine()
+            if correction_engine:
+                correction_engine.record_correction(raw_name, roster_name)
 
     # 5. Mark resolved in queue
     actual_item_id = item["item_id"]
@@ -207,6 +245,17 @@ def resolve_item(
         chosen_roster_name=roster_name,
         attendance_value=attendance_value,
         resolved_by=resolved_by,
+    )
+
+    # 6. Log resolution to audit database
+    log_resolve_item(
+        upload_id=upload_id,
+        item_id=actual_item_id,
+        chosen_roster_row=chosen_row,
+        attendance_value=attendance_value,
+        resolved_by=resolved_by,
+        course=item.get("course"),
+        session_num=item.get("session"),
     )
 
     return ResolveResult(

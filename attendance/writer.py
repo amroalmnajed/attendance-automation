@@ -7,15 +7,18 @@ Safety contract:
   - Exponential backoff with jitter on quota/transient errors.
   - Every cell write is logged to the audit log.
   - Dry-run mode prints the diff table without writing.
+  - Transactional writes with two-phase commit (SQLite → Sheets → confirm).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 
 from attendance import health
 from attendance._net import retry_call
+from attendance.roles import has_permission
 from attendance.session_resolver import (
     SheetSession,
     _get_client,
@@ -23,6 +26,7 @@ from attendance.session_resolver import (
     invalidate as invalidate_session_cache,
 )
 from attendance.utils.column_utils import col_letter_to_index
+from attendance.audit import log_write_attendance
 from core.logger import audit_write, get_logger
 
 log = get_logger("writer")
@@ -189,6 +193,9 @@ def batch_write(
     dry_run: bool = True,
     retry_cfg: Optional[dict] = None,
     store_dir: str = "review_queue",
+    cfg: Optional[dict] = None,
+    user_id: Optional[int] = None,
+    resolved_by: Optional[str] = None,
 ) -> WriteResult:
     """Write (or diff) a list of cells to the Google Sheet.
 
@@ -199,10 +206,26 @@ def batch_write(
         dry_run:    If True, print the diff but do not write anything.
         retry_cfg:  Optional dict with max_attempts, base_s, cap_s, jitter.
         store_dir:  Directory for review queue and fallback DB.
+        cfg:        Optional config dict for permission checking.
+        user_id:    Optional user ID for permission checking (legacy).
+        resolved_by: Optional user identifier for permission checking and attribution.
 
     Returns:
         WriteResult summarising what was (or would be) written.
     """
+    if cfg is None:
+        from attendance.config_runtime import _load_cfg
+        cfg = _load_cfg()
+
+    # Determine user identifier for permission check (prefer resolved_by over user_id)
+    user_identifier = resolved_by or user_id
+
+    # Check permission unless in dry-run mode or no user identifier provided
+    if not dry_run and user_identifier is not None:
+        course = getattr(session, "course", None)
+        if not has_permission(user_identifier, "edit_attendance", cfg, course=course):
+            raise PermissionError(f"User {user_identifier} does not have edit_attendance permission for course {course}")
+
     retry = retry_cfg or {}
     written: list[WriteCell] = []
     skipped: list[WriteCell] = []
@@ -276,6 +299,7 @@ def batch_write(
             _with_backoff(_do_update, op="sheets_batch_update", **backoff_kw)
         except Exception as exc:
             health.record("sheets_write_error")
+            # Enqueue to review queue for retry
             try:
                 enqueue_failed_write(
                     upload_id=upload_id,
@@ -366,7 +390,10 @@ def enqueue_failed_write(
 def retry_pending_writes(store_dir: str = "review_queue", cfg: Optional[dict] = None) -> int:
     """Process pending failed writes from SQLite. Returns count of recovered batches."""
     from attendance.review_queue import ReviewQueue
+    from attendance.dead_letter import DeadLetterQueue
+
     rq = ReviewQueue(store_dir=store_dir)
+    dlq = DeadLetterQueue()
     pending = rq.claim_pending_writes()
     if not pending:
         return 0
@@ -430,11 +457,236 @@ def retry_pending_writes(store_dir: str = "review_queue", cfg: Optional[dict] = 
             rq.mark_write_failure(write_id, str(exc))
             log.warning("pending_write_retry_failed", extra={"write_id": write_id, "error": str(exc)[:200]})
 
+            # Escalate to dead-letter queue if max retries exhausted
+            # Note: item holds pre-increment retry_count, so add 1 to check against max_retries
+            if item.get("retry_count", 0) + 1 >= item.get("max_retries", 10):
+                try:
+                    dlq.enqueue(
+                        upload_id=item["upload_id"],
+                        course=item["course"],
+                        sheet_id=sheet_id,
+                        tab=tab,
+                        operation_type="write_attendance",
+                        payload={"cells": [c.__dict__ for c in cells]},
+                        error_message=str(exc),
+                        error_type=type(exc).__name__,
+                    )
+                    log.info("write_escalated_to_dead_letter", extra={"write_id": write_id})
+                except Exception as dlq_exc:
+                    log.error("dead_letter_escalation_failed", extra={"error": str(dlq_exc)})
+
     return succeeded
 
 
+# ─── Two-phase commit (SQLite → Sheets → confirm) ─────────────────────────────
+
+def batch_write_two_phase(
+    session: SheetSession,
+    cells: list[WriteCell],
+    *,
+    upload_id: str = "unknown",
+    dry_run: bool = True,
+    retry_cfg: Optional[dict] = None,
+    store_dir: str = "review_queue",
+    resolved_by: Optional[str] = None,
+) -> WriteResult:
+    """Write cells using two-phase commit: SQLite (pending) → Sheets → confirm/rollback.
+
+    Phase 1: Open transaction on attendance.db, insert pending AttendanceRecord rows
+    Phase 2: Write to Google Sheets
+    Phase 3: Commit transaction if Sheets succeeds, rollback if it fails
+
+    This provides durability and recovery guarantees: if Sheets fails after the write
+    appears to succeed, the pending SQLite record allows for verification and retry.
+
+    Args:
+        session:    SheetSession from session_resolver.resolve()
+        cells:      List of WriteCell objects to write.
+        upload_id:  Unique identifier for this upload (for audit log).
+        dry_run:    If True, print the diff but do not write anything.
+        retry_cfg:  Optional dict with max_attempts, base_s, cap_s, jitter.
+        store_dir:  Directory for review queue and fallback DB.
+        resolved_by: Optional user identifier for attribution (uploaded_by, audit log).
+
+    Returns:
+        WriteResult summarising what was (or would be) written.
+    """
+    from attendance.review_queue import ReviewQueue
+    from attendance.db import get_session, Student, Session, AttendanceRecord, Course
+    from attendance.config_runtime import _load_cfg
+
+    cfg = _load_cfg()
+
+    # Check permission unless in dry-run mode or no resolved_by provided
+    if not dry_run and resolved_by is not None:
+        if not has_permission(resolved_by, "edit_attendance", cfg, course=session.course):
+            raise PermissionError(f"User {resolved_by} does not have edit_attendance permission for course {session.course}")
+
+    # Print diff table
+    _print_diff(cells, dry_run=dry_run)
+
+    if dry_run:
+        written = [c for c in cells if not (c.old_value and c.old_value.strip() == c.new_value)]
+        skipped = [c for c in cells if c.old_value and c.old_value.strip() == c.new_value]
+        return WriteResult(written=written, skipped=skipped, dry_run=True)
+
+    # Phase 1: Open transaction on primary database and insert pending AttendanceRecord rows
+    db_session = get_session()
+    attendance_records = []
+
+    try:
+        # Get course to find session_id
+        course = db_session.query(Course).filter(Course.course_key == session.course).first()
+        if not course:
+            raise RuntimeError(f"Course {session.course} not found in database")
+
+        # Get session
+        db_session_obj = db_session.query(Session).filter(
+            Session.course_id == course.course_id,
+            Session.session_num == session.session_num
+        ).first()
+        if not db_session_obj:
+            raise RuntimeError(f"Session {session.session_num} not found for course {session.course}")
+
+        # For each cell, find the student and create AttendanceRecord
+        for cell in cells:
+            # Find student by sheet_row
+            student = db_session.query(Student).filter(
+                Student.course_id == course.course_id,
+                Student.sheet_row == cell.sheet_row
+            ).first()
+            if not student:
+                log.warning("student_not_found_for_row", extra={"row": cell.sheet_row, "course": session.course})
+                continue
+
+            # Create AttendanceRecord
+            record = AttendanceRecord(
+                student_id=student.student_id,
+                session_id=db_session_obj.session_id,
+                value=cell.new_value,
+                uploaded_at=datetime.now(timezone.utc),
+                uploaded_by=resolved_by or "system",
+                upload_id=upload_id,
+            )
+            db_session.add(record)
+            attendance_records.append(record)
+
+        # Note: We do NOT commit yet - this is phase 1 staging
+        log.info("two_phase_phase1_staging", extra={"upload_id": upload_id, "records": len(attendance_records)})
+
+    except Exception as exc:
+        db_session.rollback()
+        db_session.close()
+        log.error("two_phase_phase1_failed", extra={"error": str(exc)})
+        raise RuntimeError("Failed to stage write in primary database") from exc
+
+    # Phase 2: Write to Google Sheets
+    retry = retry_cfg or {}
+    backoff_kw = dict(
+        max_attempts=int(retry.get("max_attempts", 6)),
+        base_s=float(retry.get("base_s", 1.0)),
+        cap_s=float(retry.get("cap_s", 32.0)),
+        jitter=bool(retry.get("jitter", True)),
+        context={"upload_id": upload_id, "course": session.course, "tab": session.tab},
+    )
+
+    try:
+        ws = _with_backoff(session.get_worksheet, op="sheets_open_worksheet", **backoff_kw)
+    except Exception as exc:
+        health.record("sheets_write_error")
+        # Phase 3 rollback: rollback SQLite transaction
+        db_session.rollback()
+        db_session.close()
+        raise
+
+    safe_cells, already_applied, conflicts = reconcile_cells(ws, cells)
+    if conflicts:
+        # Phase 3 rollback: rollback SQLite transaction
+        db_session.rollback()
+        db_session.close()
+        # Enqueue conflict to review queue for manual resolution
+        rq = ReviewQueue(store_dir=store_dir)
+        try:
+            rq.enqueue_write_conflict(
+                upload_id=upload_id,
+                course=session.course,
+                sheet_id=session.sheet_id,
+                tab=session.tab,
+                cells=conflicts,
+                last_error="Target cells changed after validation; manual review required.",
+            )
+        except Exception as exc:
+            log.error("enqueue_write_conflict_error", extra={"error": str(exc)})
+        log.warning("two_phase_conflict", extra={"upload_id": upload_id, "count": len(conflicts)})
+        raise RuntimeError("Conflicts detected during two-phase write") from None
+
+    updates = [{"range": f"{cell.col}{cell.sheet_row}", "values": [[cell.new_value]]} for cell in safe_cells]
+
+    if updates:
+        def _do_update():
+            ws.batch_update(updates, value_input_option="USER_ENTERED")
+
+        try:
+            _with_backoff(_do_update, op="sheets_batch_update", **backoff_kw)
+        except Exception as exc:
+            health.record("sheets_write_error")
+            # Phase 3 rollback: rollback SQLite transaction
+            db_session.rollback()
+            db_session.close()
+            invalidate_session_cache()
+            raise
+
+    # Phase 3: Commit SQLite transaction (confirm success)
+    try:
+        db_session.commit()
+    except Exception as exc:
+        db_session.rollback()
+        invalidate_session_cache()
+        log.error("two_phase_commit_failed", extra={"error": str(exc)})
+        raise RuntimeError("Failed to commit write to primary database") from exc
+    finally:
+        db_session.close()
+
+    invalidate_session_cache()
+
+    # Audit log every written cell
+    for cell in safe_cells:
+        audit_write(
+            upload_id=upload_id,
+            course=session.course,
+            sheet_id=session.sheet_id,
+            tab=session.tab,
+            cell=f"{cell.col}{cell.sheet_row}",
+            old_value=cell.old_value,
+            new_value=cell.new_value,
+            dry_run=dry_run,
+        )
+        # Also log to the audit database
+        if not dry_run:
+            log_write_attendance(
+                upload_id=upload_id,
+                course=session.course,
+                sheet_id=session.sheet_id,
+                tab=session.tab,
+                cell=f"{cell.col}{cell.sheet_row}",
+                old_value=cell.old_value,
+                new_value=cell.new_value,
+                user=resolved_by or "webapp-user",
+            )
+
+    log.info(
+        "two_phase_complete",
+        extra={
+            "upload_id": upload_id,
+            "written": len(safe_cells),
+            "skipped": len(already_applied),
+        },
+    )
+    return WriteResult(written=safe_cells, skipped=already_applied, dry_run=False)
+
+
 def install(app, load_cfg: Callable[[], dict], interval: int = 300) -> bool:
-    """Schedule recurring background retries for pending writes."""
+    """Schedule recurring background retries for pending writes and dead-letter queue."""
     jq = getattr(app, "job_queue", None)
     if jq is None:
         return False
@@ -449,4 +701,63 @@ def install(app, load_cfg: Callable[[], dict], interval: int = 300) -> bool:
             log.error("pending_writes_job_failed", extra={"error": type(exc).__name__})
 
     jq.run_repeating(_job, interval=interval, first=60, name="attendance_pending_writes")
+
+    # Add dead-letter queue reprocessing job
+    async def _dlq_job(context) -> None:
+        try:
+            import asyncio
+            from attendance.dead_letter import DeadLetterQueue
+
+            dlq = DeadLetterQueue()
+
+            def _retry_dead_letter_item(item: dict) -> bool:
+                """Retry a dead-letter item by re-attempting the write."""
+                try:
+                    from attendance.session_resolver import resolve
+                    from attendance.db import get_session, Course, Session, Student
+
+                    # Reconstruct session from item
+                    course_key = item["course"]
+                    sheet_id = item["sheet_id"]
+                    tab = item["tab"]
+                    payload = item["payload"]
+                    cells_data = payload.get("cells", [])
+
+                    # Convert cell data back to WriteCell objects
+                    cells = [
+                        WriteCell(
+                            roster_name=c.get("roster_name", ""),
+                            sheet_row=int(c.get("sheet_row", 0)),
+                            col=c.get("col", ""),
+                            old_value=c.get("old_value"),
+                            new_value=c.get("new_value", ""),
+                        )
+                        for c in cells_data
+                    ]
+
+                    # Resolve session
+                    session = resolve(course_key=course_key, sheet_id=sheet_id, tab=tab)
+                    if not session:
+                        log.error("dlq_session_resolve_failed", extra={"item_id": item["item_id"]})
+                        return False
+
+                    # Re-execute write (single-phase, bypassing dead-letter escalation)
+                    from attendance.writer import batch_write
+                    batch_write(
+                        session=session,
+                        cells=cells,
+                        upload_id=item["upload_id"],
+                        dry_run=False,
+                        retry_cfg={"max_attempts": 1},  # Single attempt in DLQ retry
+                    )
+                    return True
+                except Exception as exc:
+                    log.error("dlq_retry_handler_failed", extra={"item_id": item["item_id"], "error": str(exc)})
+                    return False
+
+            await asyncio.get_running_loop().run_in_executor(None, dlq.process_pending_retries, _retry_dead_letter_item)
+        except Exception as exc:
+            log.error("dead_letter_job_failed", extra={"error": type(exc).__name__})
+
+    jq.run_repeating(_dlq_job, interval=interval, first=120, name="attendance_dead_letter")
     return True

@@ -22,6 +22,7 @@ from typing import Optional, Protocol, runtime_checkable
 
 from attendance import health
 from attendance._net import http_status, is_transient, retry_call
+from attendance.ocr_corrections import correct_ocr_text
 from core.logger import get_logger
 
 log = get_logger("ocr")
@@ -182,6 +183,8 @@ def _parse_gemini_response(raw: str) -> list[OcrRow]:
         raw_name = str(item.get("raw_name", "")).strip()
         if not raw_name:
             continue
+        # Apply OCR corrections before matching
+        raw_name = correct_ocr_text(raw_name)
         mark = item.get("status_mark")
         if mark is not None:
             mark = str(mark).strip() or None

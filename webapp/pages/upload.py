@@ -21,6 +21,12 @@ from webapp.config import (
     normalize_session_type,
 )
 
+try:
+    from attendance.session_patterns import recommend_session_type_by_key
+    _HAS_PATTERNS = True
+except Exception:
+    _HAS_PATTERNS = False
+
 
 def render_summary(summary: RunSummary) -> None:
     """Render a RunSummary in Streamlit (pure display logic, no side effects)."""
@@ -102,11 +108,37 @@ def _page_upload() -> None:
         with col2:
             allowed_types = get_allowed_session_types(course_key, int(session_num))
             type_options = allowed_types + ["Custom / Type your own..."]
-            selected_type_option = st.selectbox(
-                "Session type",
-                options=type_options,
-                help="Select or enter session type for this course",
-            )
+
+            # Get session pattern recommendation if available
+            recommended_type = None
+            if _HAS_PATTERNS:
+                try:
+                    from datetime import datetime, timezone
+                    recommended_type = recommend_session_type_by_key(
+                        course_key,
+                        datetime.now(timezone.utc),
+                        int(session_num),
+                    )
+                except Exception:
+                    pass
+
+            if recommended_type and recommended_type in allowed_types:
+                # Pre-select the recommended type and show a hint
+                default_idx = allowed_types.index(recommended_type)
+                st.info(f"💡 Based on historical patterns, we recommend: **{recommended_type}**")
+                selected_type_option = st.selectbox(
+                    "Session type",
+                    options=type_options,
+                    index=default_idx,
+                    help="Select or enter session type for this course",
+                )
+            else:
+                selected_type_option = st.selectbox(
+                    "Session type",
+                    options=type_options,
+                    help="Select or enter session type for this course",
+                )
+
             if selected_type_option == "Custom / Type your own...":
                 custom_type = st.text_input(
                     "Type session type (e.g. sat center)",

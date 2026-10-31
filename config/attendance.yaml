@@ -19,6 +19,8 @@ core:
     flagged_image_days_after_resolve: 30
     audit_log: keep
 
+
+
 attendance:
   ingest:
     channel: cli                    # google_form_drive | drive_folder | telegram | cli
@@ -51,6 +53,48 @@ attendance:
   authorized:
     telegram_ids: []
 
+  # Database configuration
+  database:
+    path: attendance.db             # SQLite database path
+    sync_interval_seconds: 300      # Sync with Google Sheets every 5 minutes
+    backup_enabled: true            # Enable automatic database backups
+    backup_dir: db_backups          # Directory for database backups
+    backup_keep_days: 30            # Keep backups for 30 days
+
+  # ML matching configuration
+  ml_matching:
+    enabled: true                   # Enable ML-based semantic matching
+    model: paraphrase-multilingual-MiniLM-L12-v2  # Sentence-transformers model
+    cache_embeddings: true          # Cache embeddings for performance
+    retrain_interval_days: 7        # Retrain model weekly on new aliases
+    threshold: 0.75                 # Cosine similarity threshold for ML matches
+    max_batch_size: 100             # Maximum names to embed in one batch
+
+  # Caching configuration
+  caching:
+    enabled: true                   # Enable caching layer
+    backend: sqlite                # Cache backend: sqlite
+    path: cache.db                  # Cache database path
+    roster_ttl: 60                  # Roster data TTL in seconds
+    session_ttl: 60                 # Session info TTL in seconds
+    embedding_ttl: null             # Embeddings cached indefinitely (null = no expiration)
+    correction_ttl: null            # OCR corrections cached indefinitely
+    permission_ttl: 300             # Permission checks TTL in seconds
+    max_size_mb: 100                # Maximum cache size in MB
+
+  # Feature 11: Role-based access control (RBAC)
+  rbac:
+    enabled: true
+    default_role: viewer
+    roles:
+      viewer:
+        telegram_ids: []
+      editor:
+        telegram_ids: []
+      admin:
+        telegram_ids: []
+    user_assignments: {}
+
   # Feature 12: missing-attendance reminders. OFF unless enabled. Needs python-telegram-bot[job-queue].
   # Uses core.app.timezone. A reminder is sent once per expected class if no upload is recorded for that
   # course on that date (counts come from the upload history, not from Google Sheets). Text has no names.
@@ -60,13 +104,6 @@ attendance:
     window_hours: 12                # stop trying this long after the class end time
     check_every_minutes: 10
     recipients: both                # admin | teacher | both
-    schedule: # e.g.  crash: [{day: mon, time: "18:00"}, {day: thu, time: "18:00"}]
-  reminders:
-    enabled: true
-    grace_minutes: 60
-    window_hours: 12
-    check_every_minutes: 10
-    recipients: both
     schedule:
       g10:
         - {day: sat, time: "22:00"}
@@ -161,16 +198,31 @@ attendance:
     skip_row_patterns:
       - '\(Ref\)\s*$'               # row label "AAAAAAAAAAAAAAAA (Ref)" in all sheets
     missing_student_policy: report  # ignore | report | mark_absent
+    use_ml: true                    # Enable ML semantic matching
+    ml_threshold: 0.75              # Cosine similarity threshold for ML matches
+    ml_margin: 0.05                 # Required margin between top 2 ML candidates for auto-accept
 
   write:
     session_check: strict           # strict: SESSION_MISMATCH blocks the whole upload
     overwrite: refuse               # refuse | force (force only via --force CLI flag)
     values_source: sheet            # read dropdowns live; config values only for comparison
+    two_phase: false                # Enable two-phase commit (SQLite staging → Sheets → confirm)
     retry:
       max_attempts: 6
       base_s: 1.0
       cap_s: 32.0
       jitter: true
+
+  dead_letter:
+    max_retries: 10                # maximum retry attempts for failed operations
+    expires_after_days: 30          # days until dead-letter items expire
+    retry_base_seconds: 2           # base for exponential backoff
+    retry_max_seconds: 3600         # maximum backoff delay (1 hour)
+    cleanup_succeeded_days: 7       # delete succeeded items after this many days
+
+  concurrency:
+    max_workers: 4                  # maximum number of worker threads for concurrent processing
+    timeout: null                   # optional timeout for individual tasks (seconds)
 
   review:
     store: local_json               # gcs_json | local_json

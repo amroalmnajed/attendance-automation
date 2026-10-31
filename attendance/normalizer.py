@@ -180,8 +180,9 @@ def normalize_for_matching(text: str) -> str:
     Pipeline:
     1. Strip Arabic diacritics / tatweel and unify letter forms (normalize_arabic).
     2. If the text is still Arabic-script after normalisation, transliterate to Latin.
-    3. Normalise Latin (lowercase, strip accents/punctuation).
-    4. Apply variant folding table (name_variants.yaml).
+    3. Apply transliteration corrections from name_patterns.py.
+    4. Normalise Latin (lowercase, strip accents/punctuation).
+    5. Apply variant folding table (name_variants.yaml).
     """
     text = normalize_arabic(text)
     if _contains_arabic(text):

@@ -45,6 +45,7 @@ _PAGES: dict[str, str] = {
     "🎦 Zoom": "zoom",
     "🔍 Review Queue": "review",
     "📊 Attendance Viewer": "viewer",
+    "📋 Audit Log": "audit",
     "🛠️ Admin": "admin",
 }
 
@@ -127,6 +128,11 @@ def _page_admin() -> None:
     render_admin()
 
 
+def _page_audit() -> None:
+    from webapp.pages.audit import _page_audit as render_audit
+    render_audit()
+
+
 _PAGE_RENDERERS: dict[str, object] = {
     "dashboard": _page_dashboard,
     "upload": _page_upload,
@@ -134,6 +140,7 @@ _PAGE_RENDERERS: dict[str, object] = {
     "zoom": _page_zoom,
     "review": _page_review,
     "viewer": _page_viewer,
+    "audit": _page_audit,
     "admin": _page_admin,
 }
 

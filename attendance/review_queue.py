@@ -182,6 +182,7 @@ class _Store:
         cells: list[dict],
         last_error: Optional[str] = None,
         max_retries: int = 10,
+        status: str = "pending",
     ) -> str:
         write_id = str(uuid.uuid4())[:12]
         now = _now_iso()
@@ -191,7 +192,7 @@ class _Store:
                 INSERT INTO pending_writes (
                     write_id, upload_id, course, sheet_id, tab, cells_json,
                     retry_count, max_retries, last_error, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'pending', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                 """,
                 (
                     write_id,
@@ -202,6 +203,7 @@ class _Store:
                     json.dumps(cells, ensure_ascii=False),
                     max_retries,
                     last_error or "",
+                    status,
                     now,
                     now,
                 ),
@@ -450,6 +452,7 @@ class ReviewQueue:
         cells: list[Any],
         last_error: Optional[str] = None,
         max_retries: int = 10,
+        status: str = "pending",
     ) -> str:
         cell_dicts = [
             {"roster_name": getattr(c, "roster_name", ""),
@@ -468,6 +471,7 @@ class ReviewQueue:
             cells=cell_dicts,
             last_error=last_error,
             max_retries=max_retries,
+            status=status,
         )
 
     def list_pending_writes(self) -> list[dict]:

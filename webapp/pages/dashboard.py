@@ -38,6 +38,9 @@ def _navigate_to_zoom():
 def _navigate_to_review():
     st.session_state["_nav"] = "🔍 Review Queue"
 
+def _navigate_to_audit():
+    st.session_state["_nav"] = "📋 Audit Log"
+
 def _navigate_to_review_with_upload(upload_id: str):
     st.session_state["last_upload_id"] = upload_id
     st.session_state["_nav"] = "🔍 Review Queue"
@@ -102,7 +105,7 @@ def _page_dashboard() -> None:
     # ─── Quick Actions ──────────────────────────────────────────────────────────
     st.subheader("Quick Actions")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.button("📤 Upload Photos", width='stretch', on_click=_navigate_to_upload)
@@ -115,6 +118,9 @@ def _page_dashboard() -> None:
 
     with col4:
         st.button("🔍 Review Queue", width='stretch', on_click=_navigate_to_review)
+
+    with col5:
+        st.button("📋 Audit Log", width='stretch', on_click=_navigate_to_audit)
 
     st.divider()
 

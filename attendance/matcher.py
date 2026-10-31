@@ -19,6 +19,7 @@ from typing import Callable, Optional
 
 from rapidfuzz import fuzz
 
+from attendance.name_patterns import NamePatternResolver
 from attendance.normalizer import normalize_for_matching
 from core.logger import get_logger
 
@@ -130,6 +131,9 @@ class Matcher:
         margin_strong: float = 20.0,
         alias_lookup: Optional[Callable[[str], Optional[str]]] = None,
         use_phonetic: bool = True,
+        use_ml: bool = False,
+        ml_threshold: float = 0.75,
+        ml_margin: float = 0.05,
     ):
         self.t_high = t_high
         self.margin = margin
@@ -143,16 +147,31 @@ class Matcher:
         # raw paper name -> learned roster name (from human review decisions), or None.
         self.alias_lookup = alias_lookup
         self.use_phonetic = use_phonetic
+        # ML semantic matching
+        self.use_ml = use_ml
+        self.ml_threshold = ml_threshold
+        self.ml_margin = ml_margin
+        self.ml_threshold = ml_threshold
+        self._ml_matcher = None
+        # Name pattern resolver for partial matching and nicknames
+        self._pattern_resolver: Optional[NamePatternResolver] = None
 
         # Set of roster rows already claimed in this upload (prevents collisions)
+        # Can be replaced with a shared set for thread-safe concurrent processing
         self._claimed: set[int] = set()
+        # Optional lock for thread-safe collision tracking
+        self._claimed_lock: Optional[threading.Lock] = None
         # name -> normalize_for_matching(name). Normalisation is pure per name, so each roster
         # entry is normalised once per matcher instead of once per query.
         self._norm_cache: dict[str, str] = {}
 
     def reset(self) -> None:
         """Reset collision tracker (and the normalisation cache) between uploads."""
-        self._claimed = set()
+        if self._claimed_lock:
+            with self._claimed_lock:
+                self._claimed.clear()
+        else:
+            self._claimed = set()
         self._norm_cache = {}
 
     def _norm(self, name: str) -> str:
@@ -163,6 +182,17 @@ class Matcher:
                 self._norm_cache.clear()
             hit = self._norm_cache[name] = normalize_for_matching(name)
         return hit
+
+    def _get_pattern_resolver(self) -> NamePatternResolver:
+        """Lazy-load NamePatternResolver."""
+        if self._pattern_resolver is None:
+            self._pattern_resolver = NamePatternResolver(
+                use_nicknames=True,
+                use_transliteration=True,
+                use_partial_matching=True,
+                partial_threshold=0.9,
+            )
+        return self._pattern_resolver
 
     def score_pair(self, query: str, candidate: str) -> float:
         """Composite score: 0.5 * token_sort_ratio + 0.5 * token_set_ratio."""
@@ -203,11 +233,22 @@ class Matcher:
 
         query = normalize_for_matching(raw_name)
 
-        # Learned alias: a human already confirmed this exact paper spelling → roster student.
+        # Phase 1: Learned alias (human-confirmed exact spelling → roster student)
         alias_hit = self._try_alias(raw_name, query, roster, paper_row_index)
         if alias_hit is not None:
             return alias_hit
 
+        # Phase 1.5: Name pattern matching (partial names, nicknames)
+        pattern_hit = self._try_pattern_match(raw_name, query, roster, paper_row_index)
+        if pattern_hit is not None:
+            return pattern_hit
+
+        # Phase 2: ML semantic matching (BERT-based semantic similarity)
+        ml_hit = self._try_ml_match(raw_name, query, roster, paper_row_index, ocr_confidence, min_confidence)
+        if ml_hit is not None:
+            return ml_hit
+
+        # Phase 3: Fall back to RapidFuzz fuzzy matching
         scored: list[Candidate] = []
         for roster_name, sheet_row in roster:
             norm_roster = self._norm(roster_name)
@@ -282,11 +323,18 @@ class Matcher:
                 return make_result(MatchDecision.REVIEW, ReasonCode.MATCH_AMBIGUOUS)
 
         # Gate 6: roster collision
-        if best.roster_row in self._claimed:
-            return make_result(MatchDecision.REVIEW, ReasonCode.MATCH_ROSTER_COLLISION)
+        if self._claimed_lock:
+            with self._claimed_lock:
+                collision = best.roster_row in self._claimed
+                if not collision:
+                    self._claimed.add(best.roster_row)
+        else:
+            collision = best.roster_row in self._claimed
+            if not collision:
+                self._claimed.add(best.roster_row)
 
-        # All gates passed
-        self._claimed.add(best.roster_row)
+        if collision:
+            return make_result(MatchDecision.REVIEW, ReasonCode.MATCH_ROSTER_COLLISION)
         log.debug(
             "match_accept",
             extra={
@@ -316,14 +364,164 @@ class Matcher:
         if hit is None:
             return None  # student no longer on roster
         cand = Candidate(roster_name=hit[0], roster_row=hit[1], score=100.0)
-        collision = hit[1] in self._claimed
-        if not collision:
-            self._claimed.add(hit[1])
+        if self._claimed_lock:
+            with self._claimed_lock:
+                collision = hit[1] in self._claimed
+                if not collision:
+                    self._claimed.add(hit[1])
+        else:
+            collision = hit[1] in self._claimed
+            if not collision:
+                self._claimed.add(hit[1])
         return MatchResult(
             decision=MatchDecision.REVIEW if collision else MatchDecision.AUTO_ACCEPT,
             reason=ReasonCode.MATCH_ROSTER_COLLISION if collision else ReasonCode.OK,
             best=cand,
             top3=[cand],
+            raw_name=raw_name,
+            normalized_query=query,
+            paper_row_index=paper_row_index,
+        )
+
+    def _try_pattern_match(
+        self,
+        raw_name: str,
+        query: str,
+        roster: list[tuple[str, int]],
+        paper_row_index: int,
+    ) -> Optional[MatchResult]:
+        """Resolve via name pattern matching (partial names, nicknames). None → fall through."""
+        resolver = self._get_pattern_resolver()
+
+        # Try partial name matching for each roster entry
+        scored: list[Candidate] = []
+        for roster_name, sheet_row in roster:
+            matched, match_type = resolver.match_partial(query, roster_name)
+            if matched:
+                # Boost score based on match type (first/last name matches are strong signals)
+                boost = 15.0 if match_type in ("first", "last") else 10.0
+                norm_roster = self._norm(roster_name)
+                s = self.score_pair(query, norm_roster) + boost
+                scored.append(Candidate(roster_name=roster_name, roster_row=sheet_row, score=min(100.0, s)))
+
+        if not scored:
+            return None
+
+        # Sort and check for collision
+        scored.sort(key=lambda c: c.score, reverse=True)
+        best = scored[0]
+        top3 = scored[:3]
+
+        # Check collision
+        if self._claimed_lock:
+            with self._claimed_lock:
+                collision = best.roster_row in self._claimed
+                if not collision:
+                    self._claimed.add(best.roster_row)
+        else:
+            collision = best.roster_row in self._claimed
+            if not collision:
+                self._claimed.add(best.roster_row)
+
+        # Only auto-accept if score is high enough and no collision
+        if best.score >= self.t_high and not collision:
+            return MatchResult(
+                decision=MatchDecision.AUTO_ACCEPT,
+                reason=ReasonCode.OK,
+                best=best,
+                top3=top3,
+                raw_name=raw_name,
+                normalized_query=query,
+                paper_row_index=paper_row_index,
+            )
+        # Otherwise return REVIEW result
+        return MatchResult(
+            decision=MatchDecision.REVIEW,
+            reason=ReasonCode.MATCH_ROSTER_COLLISION if collision else ReasonCode.MATCH_LOW_SCORE,
+            best=best,
+            top3=top3,
+            raw_name=raw_name,
+            normalized_query=query,
+            paper_row_index=paper_row_index,
+        )
+
+    def _try_ml_match(
+        self,
+        raw_name: str,
+        query: str,
+        roster: list[tuple[str, int]],
+        paper_row_index: int,
+        ocr_confidence: float,
+        min_confidence: float,
+    ) -> Optional[MatchResult]:
+        """Resolve via ML semantic matching. None → fall through to RapidFuzz."""
+        if not self.use_ml:
+            return None
+
+        # Gate 1: OCR confidence check (enforced before ML matching)
+        if ocr_confidence < min_confidence:
+            return None
+
+        # Gate 4: Token count check
+        if len(query.split()) < self.min_tokens_for_auto:
+            return None
+
+        # Lazy-load ML matcher
+        if self._ml_matcher is None:
+            try:
+                from attendance.ml_matcher import init_ml_matcher
+                self._ml_matcher = init_ml_matcher(threshold=self.ml_threshold)
+            except ImportError:
+                log.warning("ML matching requested but sentence-transformers not available")
+                self.use_ml = False
+                return None
+
+        roster_names = [name for name, _ in roster]
+        matched_name, similarity, top3 = self._ml_matcher.match(raw_name, roster_names, self.ml_threshold)
+
+        if matched_name is None:
+            return None
+
+        # Gate 5: Ambiguity margin check
+        if len(top3) >= 2:
+            top1_score = top3[0][1]
+            top2_score = top3[1][1]
+            margin = top1_score - top2_score
+            if margin < self.ml_margin:
+                return None
+
+        # Find the roster entry for the matched name
+        hit = next(((n, r) for n, r in roster if n == matched_name), None)
+        if hit is None:
+            return None
+
+        # Convert similarity (0-1) to score (0-100)
+        score = similarity * 100.0
+        cand = Candidate(roster_name=hit[0], roster_row=hit[1], score=score)
+        if self._claimed_lock:
+            with self._claimed_lock:
+                collision = hit[1] in self._claimed
+                if not collision:
+                    self._claimed.add(hit[1])
+        else:
+            collision = hit[1] in self._claimed
+            if not collision:
+                self._claimed.add(hit[1])
+
+        # Build top3 candidates with roster rows
+        top3_candidates = []
+        for name, sim in top3:
+            roster_entry = next(((n, r) for n, r in roster if n == name), None)
+            if roster_entry:
+                top3_candidates.append(
+                    Candidate(roster_name=roster_entry[0], roster_row=roster_entry[1], score=sim * 100.0)
+                )
+
+        return MatchResult(
+            decision=MatchDecision.REVIEW if collision else MatchDecision.AUTO_ACCEPT,
+            reason=ReasonCode.MATCH_ROSTER_COLLISION if collision else ReasonCode.OK,
+            best=cand,
+            top3=top3_candidates[:3],
             raw_name=raw_name,
             normalized_query=query,
             paper_row_index=paper_row_index,
@@ -344,4 +542,11 @@ def build_matcher(cfg: dict, alias_lookup: Optional[Callable[[str], Optional[str
         weight_sort=float(cfg.get("weights", {}).get("token_sort", 0.5)),
         weight_set=float(cfg.get("weights", {}).get("token_set", 0.5)),
         use_phonetic=bool(cfg.get("use_phonetic", cfg.get("phonetic", True))),
+        use_ml=bool(cfg.get("use_ml", False)),
+        ml_threshold=float(cfg.get("ml_threshold", 0.75)),
+        ml_margin=float(cfg.get("ml_margin", 0.05)),
     )
+
+
+# Compatibility alias for existing code that expects NameMatcher
+NameMatcher = Matcher
