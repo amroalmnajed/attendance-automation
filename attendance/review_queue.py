@@ -296,6 +296,7 @@ class _Store:
                     "UPDATE pending_writes SET status = 'processing', updated_at = ? WHERE write_id = ? AND status = 'pending'",
                     [(now, write_id) for write_id in ids],
                 )
+            conn.commit()
             return [{**dict(row), "cells": json.loads(row["cells_json"])} for row in rows]
 
     def release_stale_write_claims(self, older_than_seconds: int = 900) -> int:
