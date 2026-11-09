@@ -19,7 +19,7 @@ Entry point:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from attendance import aliases as aliases_mod
 from attendance import absent as absent_mod
@@ -30,13 +30,11 @@ from attendance.gates import check_all_gates
 from attendance.matcher import MatchDecision, MatchResult, ReasonCode, build_matcher
 from attendance.ocr import OcrRow
 from attendance.roles import has_permission
-from attendance.session_resolver import resolve
 from attendance.review_queue import ReviewQueue
 from attendance.session_resolver import SheetSession, resolve
 from attendance.utils.column_utils import col_letter_to_index
 from attendance.utils.progress import ProgressFn, STAGE_MATCHING, STAGE_SAVING, _emit
 from attendance.writer import WriteCell, batch_write, batch_write_two_phase
-from attendance.marks import normalize_attendance_mark
 from core.logger import get_logger
 
 log = get_logger("row_processor")
@@ -44,7 +42,7 @@ log = get_logger("row_processor")
 
 def _process_ocr_row(
     ocr_row: OcrRow,
-    matcher: any,
+    matcher: Any,
     session_info: SheetSession,
     course: str,
     session_num: int,
@@ -53,13 +51,13 @@ def _process_ocr_row(
     upload_id: str,
     image_path: str,
     review_queue: ReviewQueue,
-    summary: any,
+    summary: Any,
     col_data: list[str],
     session_col: str,
     type_col: Optional[str],
     allowed_attendance: list[str],
     force: bool,
-    ws: any,
+    ws: Any,
 ) -> tuple[Optional[WriteCell], Optional[WriteCell], set[int]]:
     """Process a single OCR row and return cells to write.
 
@@ -67,7 +65,6 @@ def _process_ocr_row(
         Tuple of (attendance_cell, type_cell, candidate_rows)
     """
     candidate_rows = set()
-    cells_to_write = []
     NOISE_WORDS = {"name", "student", "student name", "الاسم", "اسم", "اسم الطالب", "م"}
     MIN_CHARS = 2
 
@@ -127,7 +124,6 @@ def _process_ocr_row(
         return None, None, candidate_rows
 
     raw_mark = ocr_row.status_mark or "Present"
-    canonical = normalize_attendance_mark(raw_mark)
 
     roster_row = match_result.best.roster_row
     if roster_row <= 0 or roster_row > len(col_data):
@@ -245,7 +241,6 @@ def process_rows(
             summary.errors.append(f"Permission denied: user '{resolved_by}' does not have edit_attendance permission for course '{course}'")
             return summary
 
-    col_range = f"{session_info.session_col}:{session_info.session_col}"
     col_data = ws.col_values(col_letter_to_index(session_info.session_col))
 
     alias_store = AliasStore(
@@ -322,9 +317,6 @@ def process_rows(
                 cells_to_write.append(type_cell)
     else:
         # Process rows sequentially (original behavior)
-        NOISE_WORDS = {"name", "student", "student name", "الاسم", "اسم", "اسم الطالب", "م"}
-        MIN_CHARS = 2
-
         for ocr_row in ocr_rows:
             attendance_cell, type_cell, row_candidates = _process_ocr_row(
                 ocr_row=ocr_row,

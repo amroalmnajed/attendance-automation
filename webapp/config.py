@@ -17,7 +17,10 @@ from typing import Optional
 
 import yaml
 
+from core.logger import get_logger
 from core.paths import data_path
+
+log = get_logger("webapp_config")
 
 # ---------------------------------------------------------------------------
 # Streamlit is optional so this module is importable in plain pytest sessions.
@@ -44,10 +47,10 @@ def _secret(key: str, default: str = "") -> str:
     if _HAS_ST:
         try:
             return str(st.secrets[key])  # type: ignore[attr-defined]
-        except Exception:
+        except Exception as exc:
+            log.debug("webapp_config_swallowed", extra={"error": str(exc)})
             # KeyError (key absent), FileNotFoundError (no secrets.toml),
             # StreamlitAPIException (called outside Streamlit context in tests)
-            pass
     return os.environ.get(key, default)
 
 
@@ -203,8 +206,8 @@ def normalize_session_type(input_str: Optional[str], course_key: str, session_nu
         best = process.extractOne(expanded_phrase, allowed, scorer=fuzz.WRatio)
         if best and best[1] >= 65:
             return best[0]
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("webapp_config_swallowed", extra={"error": str(exc)})
 
     return cleaned
 
@@ -302,8 +305,8 @@ def detect_next_session_number(course_key: str, cfg: Optional[dict] = None) -> i
                     detected = min(max(filled_sessions) + 1, max_header_session)
                 else:
                     detected = 1
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("webapp_config_swallowed", extra={"error": str(exc)})
 
     # Fallback to attendance history
     if detected is None:
@@ -313,8 +316,8 @@ def detect_next_session_number(course_key: str, cfg: Optional[dict] = None) -> i
             valid_sessions = [int(e["session"]) for e in entries if str(e.get("session", "")).isdigit()]
             if valid_sessions:
                 detected = max(valid_sessions) + 1
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("webapp_config_swallowed", extra={"error": str(exc)})
 
     # Fallback to SQLite review queue
     if detected is None:
@@ -325,8 +328,8 @@ def detect_next_session_number(course_key: str, cfg: Optional[dict] = None) -> i
             rq_sessions = [int(i["session"]) for i in items if str(i.get("course", "")).lower() == course_key and str(i.get("session", "")).isdigit()]
             if rq_sessions:
                 detected = max(rq_sessions)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("webapp_config_swallowed", extra={"error": str(exc)})
 
     final_val = detected if (detected and detected > 0) else 1
     _detected_sessions_cache[course_key] = (now, final_val)

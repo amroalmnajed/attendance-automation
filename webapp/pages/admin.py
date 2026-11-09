@@ -12,8 +12,11 @@ import yaml
 from attendance.config_runtime import _user_error_message
 from attendance.session_resolver import resolve as session_resolve
 from attendance.writer import WriteCell, batch_write
+from core.logger import get_logger
 from core.paths import data_path
 from webapp.config import CONFIG_PATH, COURSES
+
+log = get_logger("webapp_admin")
 
 
 def _load_config() -> dict:
@@ -132,8 +135,8 @@ def _render_revert() -> None:
                 try:
                     import re
                     m = re.search(r"\d+", matching_record.cell)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("webapp_admin_swallowed", extra={"error": str(exc)})
 
                 session_info = session_resolve(course_key=course, session_num=session_num, cfg=cfg)
                 retry_cfg = cfg.get("attendance", {}).get("write", {}).get("retry", {})

@@ -11,6 +11,7 @@ import streamlit as st
 
 from attendance.image_workflow import run, run_multi
 from attendance.utils.progress import STAGE_MATCHING, STAGE_READING, STAGE_SAVING
+from core.logger import get_logger
 from core.notifier import RunSummary
 from webapp.config import (
     CONFIG_PATH,
@@ -26,6 +27,8 @@ try:
     _HAS_PATTERNS = True
 except Exception:
     _HAS_PATTERNS = False
+
+log = get_logger("webapp_upload")
 
 
 def render_summary(summary: RunSummary) -> None:
@@ -119,8 +122,8 @@ def _page_upload() -> None:
                         datetime.now(timezone.utc),
                         int(session_num),
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("webapp_upload_swallowed", extra={"error": str(exc)})
 
             if recommended_type and recommended_type in allowed_types:
                 # Pre-select the recommended type and show a hint

@@ -166,8 +166,8 @@ def check_existing(
                 v = col_vals[row_idx - 1]
                 if v and str(v).strip():
                     return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("writer_swallowed", extra={"error": str(exc)})
 
     try:
         all_vals = ws.get_all_values()
@@ -177,8 +177,8 @@ def check_existing(
                 row_vals = all_vals[row_idx - 1]
                 if any(v and str(v).strip() for v in row_vals):
                     return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("writer_swallowed", extra={"error": str(exc)})
 
     return False
 

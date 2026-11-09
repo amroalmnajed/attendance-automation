@@ -24,7 +24,10 @@ from typing import Any, Optional
 from sqlalchemy import Boolean, DateTime, Float, Integer, LargeBinary, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+from core.logger import get_logger
 from core.paths import data_path
+
+log = get_logger("cache")
 
 
 class Base(DeclarativeBase):
@@ -108,8 +111,8 @@ class CacheBackend:
             if entry.value_bytes:
                 try:
                     return pickle.loads(entry.value_bytes)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("cache_swallowed", extra={"error": str(exc)})
             if entry.value:
                 try:
                     return json.loads(entry.value)
@@ -434,9 +437,9 @@ def warm_cache(course_keys: list[str]) -> None:
                     "type_col": session.type_col,
                     "layout": session.layout,
                 })
-        except Exception:
+        except Exception as exc:
+            log.debug("cache_swallowed", extra={"error": str(exc)})
             # Silently skip courses that fail to resolve
-            pass
 
 
 def get_cache_stats() -> dict:

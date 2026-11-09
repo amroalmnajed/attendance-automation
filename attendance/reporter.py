@@ -135,8 +135,8 @@ def generate_session_report(course: str, session: int, cfg: dict, review_store_d
                         data = json.load(fh)
                         if data.get("course") == course and data.get("session") == session:
                             pending_items += len([i for i in data.get("items", []) if i.get("status") == "pending"])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("reporter_swallowed", extra={"error": str(exc)})
 
     return {
         "course": course,

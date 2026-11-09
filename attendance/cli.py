@@ -56,19 +56,20 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
+from core.logger import get_logger
+
+log = get_logger("cli")
+
 if sys.stdout.encoding != "utf-8":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("cli_swallowed", extra={"error": str(exc)})
 
 import yaml
 
-from core.logger import get_logger
 from core.notifier import send
-
-log = get_logger("cli")
 
 
 def _load_cfg(path: str = "config/attendance.yaml") -> dict:
@@ -1175,8 +1176,8 @@ def main() -> None:
         try:
             sys.stdout.reconfigure(encoding='utf-8', errors='replace')
             sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("cli_swallowed", extra={"error": str(exc)})
 
     parser = argparse.ArgumentParser(
         description="Attendance Automation — Sub-System 1",

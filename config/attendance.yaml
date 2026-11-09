@@ -3,7 +3,7 @@ core:
     env: dev                        # dev | prod
     timezone: Africa/Cairo
     log_level: INFO
-    dry_run_default: false          # set false only after go-live checklist passes
+    dry_run_default: false          # false = writes to the real sheet. true = preview only. Currently LIVE.
 
   auth:
     credentials_env: GOOGLE_APPLICATION_CREDENTIALS  # unset on Cloud Run (attached SA)

@@ -24,8 +24,11 @@ from attendance.resolver_ops import resolve_item
 from attendance.session_resolver import resolve as session_resolve
 from attendance.session_patterns import init_pattern_engine
 from attendance.suggestions import init_suggestion_engine
+from core.logger import get_logger
 from core.paths import data_path
 from webapp.config import CONFIG_PATH
+
+log = get_logger("webapp_review")
 
 
 def _load_config() -> dict:
@@ -636,9 +639,9 @@ def _render_review_item(
                                         match = next((r for r in session_info.roster if r[0] == final_name), None)
                                         if match:
                                             chosen_row_final = match[1]
-                                    except Exception:
+                                    except Exception as exc:
+                                        log.debug("webapp_review_swallowed", extra={"error": str(exc)})
                                         # Fall back to original row if lookup fails
-                                        pass
                                 _resolve_item_action(item, upload_id, item_id, queue, cfg, dry_run, resolved_by, chosen_row=chosen_row_final, attendance_value=attendance_choice)
                         except ValueError:
                             pass

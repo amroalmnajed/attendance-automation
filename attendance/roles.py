@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
 from attendance.cache import get_cache
+from core.logger import get_logger
+
+log = get_logger("roles")
 
 AUTHORIZED_ENV = "AUTHORIZED_TELEGRAM_IDS"
 
@@ -156,8 +159,8 @@ def _get_db_course_permissions(uid: Optional[int], course_id: Optional[int]) -> 
                 return perm.permission_level
         finally:
             session.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("roles_swallowed", extra={"error": str(exc)})
 
     return None
 
@@ -185,8 +188,8 @@ def _get_course_id_from_key(course_key: str) -> Optional[int]:
                 return course.course_id
         finally:
             session.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("roles_swallowed", extra={"error": str(exc)})
 
     return None
 
@@ -456,8 +459,8 @@ def guard(level: str, load_cfg: Callable[[], dict], get_log: Optional[Callable[[
                 try:
                     if get_log:
                         get_log().error("role_check_failed", extra={"error": type(exc).__name__})
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("roles_swallowed", extra={"error": str(exc)})
             if d.allowed:
                 return await fn(update, context, *a, **k)
             await _refuse(update, context, d, level, uid)

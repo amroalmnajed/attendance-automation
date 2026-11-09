@@ -157,8 +157,8 @@ def _dispatch(text: str, ids: list[int]) -> None:
     def _go():
         try:
             notifier.send_text(text, ids)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("health_swallowed", extra={"error": str(exc)})
     if _THREADED:
         threading.Thread(target=_go, daemon=True).start()
     else:

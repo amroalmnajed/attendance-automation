@@ -83,8 +83,8 @@ def phonetic_tokens_match(t1: str, t2: str) -> bool:
             return True
         if jellyfish.metaphone(t1) == jellyfish.metaphone(t2):
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("matcher_swallowed", extra={"error": str(exc)})
     return False
 
 
@@ -151,7 +151,6 @@ class Matcher:
         self.use_ml = use_ml
         self.ml_threshold = ml_threshold
         self.ml_margin = ml_margin
-        self.ml_threshold = ml_threshold
         self._ml_matcher = None
         # Name pattern resolver for partial matching and nicknames
         self._pattern_resolver: Optional[NamePatternResolver] = None

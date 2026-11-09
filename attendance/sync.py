@@ -190,8 +190,8 @@ def sync_course_from_sheet(
                             if val and val.strip():
                                 session_type = val.strip()
                                 break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("sync_swallowed", extra={"error": str(exc)})
 
             if sess is None:
                 sess = Session(
@@ -221,9 +221,9 @@ def sync_course_from_sheet(
                         session_num=session_num,
                         session_type=session_type,
                     )
-                except Exception:
+                except Exception as exc:
+                    log.debug("sync_swallowed", extra={"error": str(exc)})
                     # Pattern learning failures should not break sync
-                    pass
 
             session_num += 1
 

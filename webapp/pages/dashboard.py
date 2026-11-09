@@ -14,8 +14,11 @@ import yaml
 
 from attendance.history import count_marks, entries
 from attendance.review_queue import ReviewQueue
+from core.logger import get_logger
 from core.paths import data_path
 from webapp.config import CONFIG_PATH
+
+log = get_logger("dashboard")
 
 
 def _load_config() -> dict:
@@ -92,7 +95,8 @@ def _page_dashboard() -> None:
             try:
                 dt = datetime.fromisoformat(ts)
                 time_str = dt.strftime("%b %d, %Y")
-            except:
+            except Exception as exc:
+                log.warning("dashboard_error", extra={"error": str(exc)})
                 time_str = ts
         else:
             time_str = "Unknown"
@@ -189,7 +193,8 @@ def _page_dashboard() -> None:
                 try:
                     dt = datetime.fromisoformat(ts)
                     time_str = dt.strftime("%b %d, %Y %H:%M")
-                except:
+                except Exception as exc:
+                    log.warning("dashboard_error", extra={"error": str(exc)})
                     time_str = ts
             else:
                 time_str = "Unknown"

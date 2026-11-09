@@ -43,7 +43,10 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
+from core.logger import get_logger
 from core.paths import data_path
+
+log = get_logger("db")
 
 
 class Base(DeclarativeBase):
@@ -296,8 +299,8 @@ def _get_default_db_path() -> Path:
                 cfg = yaml.safe_load(f) or {}
                 db_path = cfg.get("attendance", {}).get("database", {}).get("path", "attendance.db")
                 return data_path(db_path)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("db_swallowed", extra={"error": str(exc)})
 
     # Fallback to attendance.db in the data directory
     return data_path("attendance.db")
