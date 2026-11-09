@@ -422,14 +422,8 @@ This guide covers common issues and their solutions for the attendance automatio
 - Access denied errors
 
 **Solutions**:
-1. Check Telegram bot configuration
-2. Verify authorized user list:
-   ```yaml
-   attendance:
-     authorized:
-       telegram_ids: [123456789, 987654321]
-   ```
-3. Check RBAC configuration:
+1. Verify `WEBAPP_PASSWORD` is set in `webapp/.streamlit/secrets.toml` or `.env`
+2. Check RBAC configuration:
    ```yaml
    core:
      rbac:
@@ -437,51 +431,27 @@ This guide covers common issues and their solutions for the attendance automatio
        default_role: viewer
    ```
 
-## Telegram Bot Issues
+## Upload Issues
 
-### Issue: Bot Not Responding
-
-**Symptoms**:
-- Bot doesn't reply to messages
-- Messages time out
-
-**Solutions**:
-1. Check bot token:
-   ```bash
-   echo $TELEGRAM_BOT_TOKEN
-   ```
-2. Verify bot is running:
-   ```bash
-   ps aux | grep bot
-   ```
-3. Check bot logs:
-   ```bash
-   tail -f logs/bot.log
-   ```
-4. Test with Telegram API:
-   ```bash
-   curl https://api.telegram.org/bot<TOKEN>/getMe
-   ```
-
-### Issue: Upload Fails
+### Issue: Photo Upload Fails
 
 **Symptoms**:
-- Photo upload fails
-- No response from bot
+- Photo upload fails in the webapp
+- Processing errors or timeouts
 
 **Solutions**:
 1. Check file size limits
 2. Verify photo format (JPG, PNG)
 3. Check OCR provider status
-4. Review bot logs for errors
+4. Review `logs/app.jsonl` for errors
 
 ## Performance Issues
 
 ### Issue: Slow Upload Processing
 
 **Symptoms**:
-- Upload takes > 60 seconds
-- Bot times out
+- Processing takes > 60 seconds
+- Upload times out
 
 **Solutions**:
 1. Enable concurrency:
@@ -531,9 +501,6 @@ core:
 ```bash
 # Main application logs
 tail -f logs/attendance.log
-
-# Bot logs
-tail -f logs/bot.log
 
 # Sync logs
 tail -f logs/sync.log

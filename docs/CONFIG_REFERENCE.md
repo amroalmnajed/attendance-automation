@@ -137,7 +137,7 @@ Ingestion settings for photos.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| channel | string | cli | Ingestion channel: google_form_drive, drive_folder, telegram, or cli |
+| channel | string | cli | Ingestion channel: google_form_drive, drive_folder, or cli |
 | poll_interval_s | integer | 300 | Poll interval for automatic ingestion (seconds) |
 | form_responses_sheet_id_env | string | INGEST_SHEET_ID | Environment variable for form responses sheet |
 | inbox_folder_id_env | string | INBOX_FOLDER_ID | Environment variable for inbox folder |
@@ -149,11 +149,9 @@ Ingestion settings for photos.
 
 ### attendance.authorized
 
-Authorized users for bot commands.
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| telegram_ids | list | [] | Authorized Telegram user IDs |
+> Removed: the chat bot (and its `authorized.telegram_ids` allow-list) has been
+> retired. Web access is controlled by the webapp's shared-password auth
+> (`WEBAPP_PASSWORD`) — see `webapp/README.md`.
 
 ### attendance.reminders
 
@@ -371,7 +369,7 @@ The following environment variables are referenced in the configuration:
 | Variable | Purpose |
 |----------|---------|
 | GOOGLE_APPLICATION_CREDENTIALS | Google Cloud credentials path |
-| NOTIFY_TO | Notification recipients email/Telegram |
+| NOTIFY_TO | Notification recipients (email) |
 | INGEST_SHEET_ID | Google Form responses sheet ID |
 | INBOX_FOLDER_ID | Drive inbox folder ID |
 | FREEAI_API_KEY | FreeAI API key for OCR |

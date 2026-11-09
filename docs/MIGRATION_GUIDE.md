@@ -24,8 +24,7 @@ Before starting the migration:
    - Set `HF_TOKEN` for Hugging Face model downloads (optional but recommended)
 
 4. **Stop Running Services**
-   - Stop any running Telegram bot
-   - Stop any webapp instance
+   - Stop any running webapp instance
    - Ensure no active uploads are in progress
 
 ## Migration Steps
@@ -204,13 +203,9 @@ If using local JSON review queue, migrate to database:
 
 ### Step 11: Start Services
 
-Start the Telegram bot and webapp:
+Start the webapp:
 
 ```bash
-# Start Telegram bot
-python -m attendance.bot
-
-# Start webapp
 streamlit run webapp/app.py
 ```
 

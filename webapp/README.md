@@ -1,6 +1,6 @@
 # Attendance Webapp
 
-A Streamlit web application that replaces the Telegram bot as the primary interface for attendance automation. Upload photos, paste names, process Zoom data, resolve review items, and view reports — all in the browser.
+A Streamlit web application that is the primary interface for attendance automation. Upload photos, paste names, process Zoom data, resolve review items, and view reports — all in the browser.
 
 ## Setup
 

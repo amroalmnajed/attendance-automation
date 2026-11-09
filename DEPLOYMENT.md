@@ -85,9 +85,7 @@ G9_SHEET_ID=<your-g9-sheet-id>
 
 GEMINI_API_KEY=<your-key-from-aistudio.google.com>
 
-# Optional — notifications
-TELEGRAM_BOT_TOKEN=<bot-token>        # only needed if running the Telegram ingest bot
-TELEGRAM_CHAT_ID=<your-chat-id>       # your personal chat ID for summary notifications
+# Optional — email notifications
 SMTP_HOST=smtp.gmail.com              # only needed for email notifications
 SMTP_PORT=587
 SMTP_USER=you@gmail.com
@@ -218,33 +216,32 @@ python -m attendance.cli review resolve `
 
 ---
 
-## 11. Telegram Bot (Upload Channel)
+## 11. Webapp (Upload Channel)
 
-The Telegram bot is the recommended production upload channel: send a photo, answer
-course/session/type questions, receive a summary reply.
+The Streamlit webapp is the production upload channel: open it in the browser,
+upload a photo or paste names, answer course/session/type questions, and review
+the results.
 
-### 11a. Create a bot
-1. Message `@BotFather` on Telegram → `/newbot`
-2. Copy the token → set `TELEGRAM_BOT_TOKEN` in `.env`
-3. Send yourself a message, then get your chat ID:
-   ```
-   https://api.telegram.org/bot<TOKEN>/getUpdates
-   ```
-   Copy `chat.id` → set `TELEGRAM_CHAT_ID` in `.env`
+### 11a. Configure secrets
 
-### 11b. Start the bot
+Copy `webapp/.streamlit/secrets.toml.example` to `webapp/.streamlit/secrets.toml`
+(or use `webapp/.env.example` / `.env`) and fill in `WEBAPP_PASSWORD`, the Google
+credentials, and the course sheet IDs. See `webapp/README.md` and `webapp/DEPLOY.md`.
+
+### 11b. Start the webapp
 ```powershell
-python -m attendance.ingest
+streamlit run webapp/app.py
 ```
 
-Send the bot a photo. It will ask: course → session → type (for G9/G10), then run the pipeline and reply with the summary.
+Open http://localhost:8501, log in, then upload a photo (course → session → type
+for G9/G10) or paste a list of names.
 
 ### 11c. Keep it running (Windows Task Scheduler)
 1. Open Task Scheduler → Create Basic Task
 2. Trigger: At system startup (or daily at the start of teaching day)
 3. Action: Start a program
-   - Program: `C:\Users\lenovo\Desktop\attendance-automation\.venv\Scripts\python.exe`
-   - Arguments: `-m attendance.ingest`
+   - Program: `C:\Users\lenovo\Desktop\attendance-automation\.venv\Scripts\streamlit.exe`
+   - Arguments: `run webapp/app.py --server.port 8501`
    - Start in: `C:\Users\lenovo\Desktop\attendance-automation`
 
 ---
@@ -279,7 +276,7 @@ retention:
   audit_log: keep
 ```
 
-The Telegram bot deletes temp images immediately after processing (`os.remove(img_path)`).
+Temp images are deleted immediately after processing (`os.remove(img_path)`).
 For CLI-processed images, delete manually after the session, or add a cron/scheduler task.
 
 Student names and images are **never sent to third parties** except the Gemini API for OCR.
@@ -312,10 +309,10 @@ FIRST LIVE RUN
 [ ] Confirm no stray writes (re-run same image with dry-run → should show all "=" same-value rows)
 
 OPERATIONS
-[ ] Telegram bot started and tested end-to-end with a real photo
-[ ] Notification channel configured (TELEGRAM_CHAT_ID or SMTP_*) and tested
-[ ] Task Scheduler entry created to auto-start the bot on boot
-[ ] Team briefed: how to send a photo, how to resolve review queue items
+[ ] Webapp started and tested end-to-end with a real photo upload
+[ ] Notification channel configured (SMTP_* for email, or the log channel) and tested
+[ ] Task Scheduler entry created to auto-start the webapp on boot
+[ ] Team briefed: how to use the webapp upload screen and how to resolve review queue items
 [ ] Image retention policy agreed and enforced (delete after each session or after 30 days)
 [ ] .env and service account JSON excluded from any git push (.gitignore ✓)
 ```
@@ -335,29 +332,23 @@ There is no automatic rollback command. Add one if needed for production.
 ## Release notes: Phase 1–2
 - No new environment variables and no new dependencies.
 - New optional settings live in `config/attendance.yaml` (`attendance.ingest.names_preview`, `attendance.ingest.multi_photo.*`, `attendance.absent_button.*`); every one has a safe default, see `CHANGELOG.md`.
-- The bot creates `review_queue/_absent/` (small JSON files, row numbers only). It is safe to delete old files there.
+- `review_queue/_absent/` (small JSON files, row numbers only) is safe to delete old files from.
 - `review_images/` is no longer tracked by git and is git-ignored. It holds photos of student sheets: keep it out of any public repo.
 
 ## Release notes: Phase 3
-- One new OPTIONAL environment variable: `ADMIN_TELEGRAM_IDS` (comma-separated Telegram user IDs allowed to use `/aliases`). Without it the command replies "unavailable". No new dependencies.
-- New small data files next to the old ones in `config/`: `learned_aliases.meta.json` (alias dates) and `variant_suggestions.json` (pending name-variant suggestions). Both are git-ignored like `learned_aliases.json`; back them up together. The bot also creates `review_queue/_history/` (counts only).
-- Approving a name variant (`python -m attendance.cli aliases variants review`) edits `config/name_variants.yaml` (backup `.bak`). RESTART the bot afterwards: that file is read once at start-up.
+- New small data files next to the old ones in `config/`: `learned_aliases.meta.json` (alias dates) and `variant_suggestions.json` (pending name-variant suggestions). Both are git-ignored like `learned_aliases.json`; back them up together. `review_queue/_history/` holds counts only.
+- Approving a name variant (`python -m attendance.cli aliases variants review`) edits `config/name_variants.yaml` (backup `.bak`). Restart the webapp afterwards: that file is read once at start-up.
 - `aliases remove` keeps `config/learned_aliases.json.bak` for one undo.
 - To save Gemini calls, set `attendance.ocr.second_pass.mode: low_confidence` (default `full` = unchanged behaviour).
 
 ## Release notes: Phase 4 (operations and security)
-- **New optional env var:** `TEACHER_TELEGRAM_IDS` (comma-separated Telegram user IDs). `ADMIN_TELEGRAM_IDS` now controls review, `/report`, `/streaks`, `/pending`, `/aliases` and `/health`. Teachers (and admins) can upload, paste names, tap "Mark N absent?" and undo with `/revert`. Both can also be set in `config/attendance.yaml` (`attendance.teacher.telegram_ids`, `attendance.admin.telegram_ids`). **Restart the bot after any change.**
-- **How to find a Telegram ID:** the person messages the bot; an unauthorised user is told their own ID in the refusal message. (Or they message the free "@userinfobot" in Telegram.) Send that number to an admin.
-- **New dependency:** `pip install -r requirements.txt` again (now `python-telegram-bot[job-queue]`, which adds APScheduler). Without it the bot still runs; reminders and the review-age alert just cannot run (a warning is logged and `/health` says so).
-- **Old behaviour kept:** if you configure NO teacher and NO admin, everybody can still use the bot (a warning is logged at start). `/aliases` and `/health` stay closed until an admin exists. If you configure only teachers, nobody can review: add at least one admin.
+- Reminders and health alerts are configured in `config/attendance.yaml` (`attendance.reminders.*`, `attendance.health.*`). Alerts go to admins only; reminder recipients are `admin | teacher | both`. Dry-run uploads are not counted, so a dry-run-only setup keeps reminding.
+- If the original zip with `.env`, the service-account key or the SSH keys was ever shared or committed, rotate those secrets now.
 
-### Go-live checklist: roles, reminders, alerts
-1. Put your own Telegram ID in `ADMIN_TELEGRAM_IDS`, each teacher in `TEACHER_TELEGRAM_IDS`. Restart. Check the log has no "No bot allow-list" warning.
-2. From a non-listed account, message the bot: it must refuse and show that account's ID. From a teacher account: `/start` works, `/report` and `/pending` are refused. From your admin account: `/health` replies.
-3. Run `pip install -r requirements.txt`, restart, and confirm `/health` shows "Reminders: off" (or "on").
-4. Reminders (optional): in `config/attendance.yaml` set `attendance.reminders.enabled: true`, fill `schedule` per course (weekday + class end time), choose `recipients` (default `both`), restart. Reminders only count REAL uploads (dry runs are not recorded, so a dry-run-only setup keeps reminding).
-5. Alerts: default thresholds are on. Alerts go only to admins. Lower `gemini_threshold` / `sheets_threshold` if you want earlier warnings.
-6. If the original zip with `.env`, the service-account key or the SSH keys was ever shared or committed, rotate those secrets now.
+### Go-live checklist: reminders, alerts
+1. Run `pip install -r requirements.txt`, start the webapp, and confirm `/health` (webapp admin screen) shows reminder/alert status.
+2. Reminders (optional): in `config/attendance.yaml` set `attendance.reminders.enabled: true`, fill `schedule` per course (weekday + class end time), choose `recipients` (default `both`). Reminders only count REAL uploads.
+3. Alerts: default thresholds are on. Alerts go only to admins. Lower `gemini_threshold` / `sheets_threshold` if you want earlier warnings.
 
 ## 16. Free.ai OCR Setup
 
