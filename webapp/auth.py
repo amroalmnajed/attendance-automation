@@ -62,37 +62,29 @@ def check_permission(permission: str, course: str | None = None) -> bool:
         True if the user has the permission, False otherwise.
     """
     cfg = _load_config()
-
-    # If RBAC is not configured, allow all basic permissions for webapp users
-    # (webapp is already password-protected)
-    from attendance.roles import allowlist_configured
-    if not allowlist_configured(cfg):
-        # Grant viewer-level permissions by default
-        if permission in ["view_attendance", "view_audit_log"]:
-            return True
-        # For now, also allow edit permissions in webapp (backward compatibility)
-        # TODO: Make this configurable when RBAC is fully integrated
-        return True
-
-    # Webapp users don't have Telegram IDs, so we can't use role_of directly
-    # For now, treat webapp users as having "viewer" role if no specific mapping exists
-    # This is a temporary approach until webapp user management is implemented
     user_name = st.session_state.get("user_name", "webapp-user")
 
-    # Map webapp users to roles via config (future enhancement)
+    from attendance.roles import ROLE_PERMISSIONS, allowlist_configured
+
+    view_permissions = {"view_attendance", "view_audit_log"}
+
     rbac_cfg = cfg.get("attendance", {}).get("rbac", {})
-    if isinstance(rbac_cfg, dict):
-        webapp_users = rbac_cfg.get("webapp_users", {})
-        if isinstance(webapp_users, dict):
-            role = webapp_users.get(user_name, "viewer")
-        else:
-            role = "viewer"
-    else:
-        role = "viewer"
+    webapp_users = rbac_cfg.get("webapp_users", {}) if isinstance(rbac_cfg, dict) else {}
+    if not isinstance(webapp_users, dict):
+        webapp_users = {}
 
-    # Check if role has the permission
-    from attendance.roles import ROLE_PERMISSIONS
-    if permission in ROLE_PERMISSIONS.get(role, set()):
-        return True
+    role = webapp_users.get(user_name)
 
-    return False
+    if not allowlist_configured(cfg) or role is None:
+        # Default-deny for anything destructive: without an explicit role
+        # mapping the webapp user gets read-only access at most.
+        if permission in view_permissions:
+            return True
+        st.error(
+            f"You don't have permission to '{permission}'. "
+            "Ask an admin to grant you a role in attendance.yaml "
+            "(attendance.rbac.webapp_users)."
+        )
+        return False
+
+    return permission in ROLE_PERMISSIONS.get(role, set())
