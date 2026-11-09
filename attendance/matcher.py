@@ -25,6 +25,16 @@ from core.logger import get_logger
 
 log = get_logger("matcher")
 
+# Minimum composite score for an OCR-suggested roster hint to be resolved to
+# the closest actual roster entry (fuzzy phase, matcher.py ~line 258).
+# Kept as a module constant rather than a config key: it is a sanity bound on
+# hint resolution, not a tunable matching threshold.
+SUGGESTED_NAME_RESOLVE_MIN = 90.0
+
+# How far below ``t_high`` the phonetic fallback lane may still accept a match
+# (matcher.py ~line 304). Module constant for the same reason as above.
+PHONETIC_LANE_T_HIGH_MARGIN = 15.0
+
 
 # ─── Enums & data classes ─────────────────────────────────────────────────────
 
@@ -147,22 +157,17 @@ class Matcher:
         # Name pattern resolver for partial matching and nicknames
         self._pattern_resolver: Optional[NamePatternResolver] = None
 
-        # Set of roster rows already claimed in this upload (prevents collisions)
-        # Can be replaced with a shared set for thread-safe concurrent processing
+        # Set of roster rows already claimed by an ACCEPTED match in this
+        # upload (prevents two paper lines auto-accepting the same student).
+        # REVIEW results must never add to this set.
         self._claimed: set[int] = set()
-        # Optional lock for thread-safe collision tracking
-        self._claimed_lock: Optional[threading.Lock] = None
         # name -> normalize_for_matching(name). Normalisation is pure per name, so each roster
         # entry is normalised once per matcher instead of once per query.
         self._norm_cache: dict[str, str] = {}
 
     def reset(self) -> None:
         """Reset collision tracker (and the normalisation cache) between uploads."""
-        if self._claimed_lock:
-            with self._claimed_lock:
-                self._claimed.clear()
-        else:
-            self._claimed = set()
+        self._claimed.clear()
         self._norm_cache = {}
 
     def _norm(self, name: str) -> str:
@@ -255,7 +260,7 @@ class Matcher:
                 # Model may not have copied the roster string verbatim — resolve it
                 # to the closest actual roster entry rather than discarding the hint.
                 resolved = max(scored, key=lambda c: self.score_pair(target, self._norm(c.roster_name)))
-                if self.score_pair(target, self._norm(resolved.roster_name)) >= 90.0:
+                if self.score_pair(target, self._norm(resolved.roster_name)) >= SUGGESTED_NAME_RESOLVE_MIN:
                     suggested = resolved
             if suggested is not None:
                 boost = 10.0 + 10.0 * max(0.0, min(1.0, ocr_suggested_confidence))  # +10..+20
@@ -301,26 +306,17 @@ class Matcher:
         phonetic_lane = (
             self.use_phonetic
             and lead >= self.margin
-            and best.score >= max(self.review_floor, self.t_high - 15.0)
+            and best.score >= max(self.review_floor, self.t_high - PHONETIC_LANE_T_HIGH_MARGIN)
             and phonetic_match(query, self._norm(best.roster_name))
         )
         if not strong_lane and not phonetic_lane:
             if best.score < self.t_high or lead < self.margin:
                 return make_result(MatchDecision.REVIEW, ReasonCode.MATCH_AMBIGUOUS)
 
-        # Gate 6: roster collision
-        if self._claimed_lock:
-            with self._claimed_lock:
-                collision = best.roster_row in self._claimed
-                if not collision:
-                    self._claimed.add(best.roster_row)
-        else:
-            collision = best.roster_row in self._claimed
-            if not collision:
-                self._claimed.add(best.roster_row)
-
-        if collision:
+        # Gate 6: roster collision — claim only once the match is accepted.
+        if best.roster_row in self._claimed:
             return make_result(MatchDecision.REVIEW, ReasonCode.MATCH_ROSTER_COLLISION)
+        self._claimed.add(best.roster_row)
         log.debug(
             "match_accept",
             extra={
@@ -350,15 +346,9 @@ class Matcher:
         if hit is None:
             return None  # student no longer on roster
         cand = Candidate(roster_name=hit[0], roster_row=hit[1], score=100.0)
-        if self._claimed_lock:
-            with self._claimed_lock:
-                collision = hit[1] in self._claimed
-                if not collision:
-                    self._claimed.add(hit[1])
-        else:
-            collision = hit[1] in self._claimed
-            if not collision:
-                self._claimed.add(hit[1])
+        collision = hit[1] in self._claimed
+        if not collision:
+            self._claimed.add(hit[1])
         return MatchResult(
             decision=MatchDecision.REVIEW if collision else MatchDecision.AUTO_ACCEPT,
             reason=ReasonCode.MATCH_ROSTER_COLLISION if collision else ReasonCode.OK,
@@ -379,16 +369,22 @@ class Matcher:
         """Resolve via name pattern matching (partial names, nicknames). None → fall through."""
         resolver = self._get_pattern_resolver()
 
-        # Try partial name matching for each roster entry
+        # Score every roster entry on the unboosted fuzzy metric; pattern
+        # matching only decides *which* entries are eligible candidates and
+        # adds a ranking boost. Auto-accept gates (threshold, margin, token
+        # count) must use the same unboosted scores as the fuzzy path so a
+        # partial/nickname match cannot bypass ambiguity checks.
+        base_scores: dict[int, float] = {}
         scored: list[Candidate] = []
         for roster_name, sheet_row in roster:
+            norm_roster = self._norm(roster_name)
+            base = self.score_pair(query, norm_roster)
+            base_scores[sheet_row] = base
             matched, match_type = resolver.match_partial(query, roster_name)
             if matched:
                 # Boost score based on match type (first/last name matches are strong signals)
                 boost = 15.0 if match_type in ("first", "last") else 10.0
-                norm_roster = self._norm(roster_name)
-                s = self.score_pair(query, norm_roster) + boost
-                scored.append(Candidate(roster_name=roster_name, roster_row=sheet_row, score=min(100.0, s)))
+                scored.append(Candidate(roster_name=roster_name, roster_row=sheet_row, score=min(100.0, base + boost)))
 
         if not scored:
             return None
@@ -398,19 +394,28 @@ class Matcher:
         best = scored[0]
         top3 = scored[:3]
 
-        # Check collision
-        if self._claimed_lock:
-            with self._claimed_lock:
-                collision = best.roster_row in self._claimed
-                if not collision:
-                    self._claimed.add(best.roster_row)
-        else:
-            collision = best.roster_row in self._claimed
-            if not collision:
-                self._claimed.add(best.roster_row)
+        # Check collision without claiming: only an ACCEPTED match may claim a
+        # roster row. Claiming here before the threshold check would let a weak
+        # REVIEW result block a later strong match for the same student.
+        collision = best.roster_row in self._claimed
 
-        # Only auto-accept if score is high enough and no collision
-        if best.score >= self.t_high and not collision:
+        # Same gates as the fuzzy path, evaluated on unboosted scores.
+        best_base = base_scores[best.roster_row]
+        second_base = max(
+            (s for row, s in base_scores.items() if row != best.roster_row),
+            default=0.0,
+        )
+        lead = best_base - second_base
+        token_count = len(query.split())
+
+        accepts = (
+            best_base >= self.t_high
+            and lead >= self.margin
+            and token_count >= self.min_tokens_for_auto
+            and not collision
+        )
+        if accepts:
+            self._claimed.add(best.roster_row)
             return MatchResult(
                 decision=MatchDecision.AUTO_ACCEPT,
                 reason=ReasonCode.OK,
@@ -421,9 +426,17 @@ class Matcher:
                 paper_row_index=paper_row_index,
             )
         # Otherwise return REVIEW result
+        if collision:
+            reason = ReasonCode.MATCH_ROSTER_COLLISION
+        elif token_count < self.min_tokens_for_auto:
+            reason = ReasonCode.MATCH_AMBIGUOUS
+        elif best_base >= self.review_floor:
+            reason = ReasonCode.MATCH_AMBIGUOUS
+        else:
+            reason = ReasonCode.MATCH_LOW_SCORE
         return MatchResult(
             decision=MatchDecision.REVIEW,
-            reason=ReasonCode.MATCH_ROSTER_COLLISION if collision else ReasonCode.MATCH_LOW_SCORE,
+            reason=reason,
             best=best,
             top3=top3,
             raw_name=raw_name,

@@ -123,6 +123,39 @@ class TestPhase1Cases:
         assert r2.decision == MatchDecision.REVIEW
         assert r2.reason == ReasonCode.MATCH_ROSTER_COLLISION
 
+    def test_review_match_does_not_claim_roster_row(self):
+        """A weak pattern-match REVIEW must not claim the roster row.
+
+        Regression: _try_pattern_match used to add best.roster_row to
+        self._claimed before checking the auto-accept threshold, so a
+        low-confidence REVIEW result blocked a later strong match for the
+        same student with a spurious MATCH_ROSTER_COLLISION.
+        """
+        roster = [("Ahmad Hassan Ali", 5), ("Sara Mahmoud Adel", 6)]
+        m = make_matcher()
+
+        # Weak/ambiguous partial name → pattern-match REVIEW (score < t_high)
+        r1 = m.match(
+            raw_name="Sara M",
+            ocr_confidence=0.90,
+            roster=roster,
+            paper_row_index=1,
+        )
+        assert r1.decision == MatchDecision.REVIEW
+        assert r1.best is not None
+        assert r1.best.roster_row == 6
+        # The REVIEW result must not have claimed the row
+        assert 6 not in m._claimed
+
+        # Strong, correct match for the same student later in the batch
+        r2 = m.match(
+            raw_name="Sara Mahmoud Adel",
+            ocr_confidence=0.95,
+            roster=roster,
+            paper_row_index=2,
+        )
+        assert r2.decision == MatchDecision.AUTO_ACCEPT
+        assert r2.reason == ReasonCode.OK
 
 
 # ─── Composite scoring ────────────────────────────────────────────────────────
