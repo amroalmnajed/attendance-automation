@@ -22,7 +22,6 @@ from attendance.review_crop import _crop_image
 from attendance.review_queue import ReviewQueue
 from attendance.resolver_ops import resolve_item
 from attendance.session_resolver import resolve as session_resolve
-from attendance.session_patterns import init_pattern_engine
 from attendance.suggestions import init_suggestion_engine
 from core.logger import get_logger
 from core.paths import data_path
@@ -40,7 +39,7 @@ def _load_config() -> dict:
         return {}
 
 
-def _get_course_id(course_key: str) -> Optional[int]:
+def _get_course_id(course_key: str) -> int | None:
     """Look up course_id from course_key using the database.
 
     Args:

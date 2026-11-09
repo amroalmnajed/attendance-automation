@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from attendance.cache import get_pattern_cache, set_pattern_cache
-from attendance.db import SessionLocal, Pattern, Session
+from attendance.db import SessionLocal, Pattern
 
 
 class SessionPatternEngine:
@@ -120,7 +120,6 @@ class SessionPatternEngine:
             return None, 0.0
 
         # Filter patterns matching current parity and extract session_type
-        import json
         session_types = []
         for p in patterns:
             try:
@@ -168,7 +167,6 @@ class SessionPatternEngine:
             return None, 0.0
 
         # Filter patterns matching current day and extract session_type
-        import json
         session_types = []
         for p in patterns:
             try:
@@ -219,7 +217,6 @@ class SessionPatternEngine:
             return None, 0.0
 
         # Filter patterns matching current time slot and extract session_type
-        import json
         session_types = []
         for p in patterns:
             try:
@@ -329,7 +326,6 @@ class SessionPatternEngine:
             pattern_value: Pattern value
             session_type: Session type
         """
-        import json
 
         # Serialize pattern_value and session_type as JSON
         pattern_data = json.dumps({
@@ -368,7 +364,6 @@ class SessionPatternEngine:
         Returns:
             Dictionary of patterns by type
         """
-        import json
 
         session = SessionLocal()
         try:

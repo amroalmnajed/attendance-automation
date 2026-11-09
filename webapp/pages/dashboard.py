@@ -4,15 +4,13 @@ Shows attendance overview, recent activity, and quick access to common workflows
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from functools import partial
-from pathlib import Path
 
 import streamlit as st
 import yaml
 
-from attendance.history import count_marks, entries
+from attendance.history import entries
 from attendance.review_queue import ReviewQueue
 from core.logger import get_logger
 from core.paths import data_path

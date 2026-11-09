@@ -32,12 +32,11 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
-    func,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
-    Session,
+    Session as SASession,
     mapped_column,
     relationship,
     sessionmaker,
@@ -376,7 +375,7 @@ def drop_tables() -> None:
 # ── Helper functions ───────────────────────────────────────────────────────────
 
 def audit_log_action(
-    session: Session,
+    session: SASession,
     action: str,
     entity_type: str,
     entity_id: Optional[str] = None,
@@ -414,12 +413,12 @@ def audit_log_action(
     return log_entry
 
 
-def get_course_by_key(session: Session, course_key: str) -> Optional[Course]:
+def get_course_by_key(session: SASession, course_key: str) -> Optional[Course]:
     """Get a course by its key (e.g., 'crash', 'main')."""
     return session.query(Course).filter(Course.course_key == course_key, Course.is_active == True).first()
 
 
-def get_or_create_course(session: Session, course_key: str, name: str, sheet_id: str, tab: str, layout: str = "single") -> Course:
+def get_or_create_course(session: SASession, course_key: str, name: str, sheet_id: str, tab: str, layout: str = "single") -> Course:
     """Get an existing course or create a new one."""
     course = get_course_by_key(session, course_key)
     if course is None:
@@ -435,12 +434,12 @@ def get_or_create_course(session: Session, course_key: str, name: str, sheet_id:
     return course
 
 
-def get_user_by_telegram_id(session: Session, telegram_id: int) -> Optional[User]:
+def get_user_by_telegram_id(session: SASession, telegram_id: int) -> Optional[User]:
     """Get a user by Telegram ID."""
     return session.query(User).filter(User.telegram_id == telegram_id, User.is_active == True).first()
 
 
-def get_or_create_user(session: Session, username: str, telegram_id: Optional[int] = None, role: str = "viewer") -> User:
+def get_or_create_user(session: SASession, username: str, telegram_id: Optional[int] = None, role: str = "viewer") -> User:
     """Get an existing user or create a new one."""
     if telegram_id:
         user = get_user_by_telegram_id(session, telegram_id)

@@ -8,15 +8,11 @@ Learning System:
 """
 from __future__ import annotations
 
-import json
-import re
-from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
 from attendance.cache import get_ocr_correction, set_ocr_correction
 from attendance.db import SessionLocal, OcrCorrection
-from attendance.normalizer import normalize_for_matching
 
 
 class OCRCorrectionEngine:

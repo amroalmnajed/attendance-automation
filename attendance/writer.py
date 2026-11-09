@@ -714,7 +714,6 @@ def install(app, load_cfg: Callable[[], dict], interval: int = 300) -> bool:
                 """Retry a dead-letter item by re-attempting the write."""
                 try:
                     from attendance.session_resolver import resolve
-                    from attendance.db import get_session, Course, Session, Student
 
                     # Reconstruct session from item
                     course_key = item["course"]

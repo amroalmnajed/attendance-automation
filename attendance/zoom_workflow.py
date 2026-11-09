@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import yaml
 
@@ -35,7 +35,7 @@ from attendance.zoom_csv import (
     write_decision_log,
 )
 from attendance.zoom_api import fetch_past_meeting_participants
-from attendance.utils.progress import ProgressFn, STAGE_READING, _emit
+from attendance.utils.progress import ProgressFn, STAGE_READING
 from core.logger import get_logger
 from core.notifier import RunSummary
 

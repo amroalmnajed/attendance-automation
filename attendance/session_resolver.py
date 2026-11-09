@@ -23,7 +23,7 @@ from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from attendance import _net
 from attendance._net import retry_call
 from attendance.utils.column_utils import col_letter_to_index, index_to_col_letter
-from attendance.cache import get_roster, set_roster, get_session_info, set_session_info, invalidate_roster, invalidate_session
+from attendance.cache import get_roster, set_roster, get_session_info, set_session_info
 from core.auth import get_credentials
 from core.logger import get_logger
 

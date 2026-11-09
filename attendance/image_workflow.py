@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import yaml
 

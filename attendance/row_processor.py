@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from attendance import aliases as aliases_mod
 from attendance import absent as absent_mod
 from attendance import history as history_mod
 from attendance.aliases import AliasStore
