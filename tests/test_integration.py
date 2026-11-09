@@ -1,6 +1,6 @@
-"""tests/test_integration.py — Integration tests for database, sync, and end-to-end pipeline.
+"""tests/test_integration.py — Integration tests for database and end-to-end pipeline.
 
-Tests database operations, synchronization behavior, and the full upload → match → review → write pipeline.
+Tests database operations and the full upload → match → review → write pipeline.
 """
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ from attendance.db import (
     OcrCorrection,
     Pattern,
 )
-from attendance.sync import sync_course_from_sheet, sync_attendance_to_sheet
 from attendance.matcher import MatchResult, Candidate, ReasonCode, MatchDecision
 from attendance.ocr import OcrRow
 from attendance.audit import log_resolve_item
@@ -386,30 +385,6 @@ class TestReviewQueueIntegration:
             if hasattr(queue, '_store') and hasattr(queue._store, '_conn'):
                 queue._store._conn.close()
             shutil.rmtree(review_dir, ignore_errors=True)
-
-
-class TestSyncBehavior:
-    """Test synchronization behavior between SQLite and Google Sheets."""
-
-    def test_sync_status_tracking(self):
-        """Test that sync status is tracked correctly."""
-        from attendance.sync import get_sync_status, _sync_status
-
-        # Record a successful sync
-        _sync_status.record_success("sheets_to_sqlite", rows_read=10, rows_written=5, conflicts=0)
-
-        status = get_sync_status()
-        assert status["last_sync_direction"] == "sheets_to_sqlite"
-        assert status["last_sync_rows_read"] == 10
-        assert status["last_sync_rows_written"] == 5
-        assert status["last_sync_error"] is None
-
-        # Record a failed sync
-        _sync_status.record_failure("sqlite_to_sheets", "API error")
-
-        status = get_sync_status()
-        assert status["last_sync_direction"] == "sqlite_to_sheets"
-        assert status["last_sync_error"] == "API error"
 
 
 class TestEndToEndPipeline:
