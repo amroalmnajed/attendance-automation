@@ -1,4 +1,4 @@
-"""OCR accuracy benchmarks with before/after ML comparison."""
+"""OCR accuracy benchmarks."""
 
 import tempfile
 import time
@@ -9,7 +9,6 @@ from typing import Dict, List, Tuple
 import pytest
 
 from attendance.matcher import Matcher
-from attendance.ml_matcher import MLMatcher
 from attendance.ocr_corrections import OCRCorrectionEngine
 from attendance.db import init_db, create_tables, get_session, Student, Course
 
@@ -20,11 +19,9 @@ class OCRBenchmarkResult:
     def __init__(self):
         self.total_names = 0
         self.correct_matches = 0
-        self.ml_matches = 0
         self.rapidfuzz_matches = 0
         self.alias_matches = 0
         self.no_matches = 0
-        self.ml_match_latency_total = 0.0
         self.rapidfuzz_latency_total = 0.0
 
 
@@ -212,59 +209,6 @@ class TestOCRAccuracyBenchmark:
         # Assert baseline accuracy is reasonable
         assert accuracy >= 50, "RapidFuzz baseline accuracy should be at least 50%"
 
-    def test_hybrid_matching_accuracy(self, sample_roster):
-        """Benchmark accuracy using ML matching directly."""
-        ml_matcher = MLMatcher()
-
-        # Simulate OCR results with typical errors
-        ocr_results = [
-            ("Ahmed Mohameed", "Ahmed Mohamed", 0.85),
-            ("Mohmmed Ali", "Mohamed Ali", 0.80),
-            ("Sara Hassann", "Sara Hassan", 0.82),
-            ("Omar Khalidd", "Omar Khalid", 0.84),
-            ("Fatima Ahmmed", "Fatima Ahmed", 0.81),
-            ("Youssef Ibrahiim", "Youssef Ibrahim", 0.79),
-            ("Nour Ahhmed", "Nour Ahmed", 0.83),
-            ("Karim Mahmood", "Karim Mahmoud", 0.80),
-            ("Laila Mohamad", "Laila Mohamed", 0.82),
-            ("Hassan Alli", "Hassan Ali", 0.81),
-        ]
-
-        result = OCRBenchmarkResult()
-        result.total_names = len(ocr_results)
-
-        # Extract roster names for ML matcher
-        roster_names = [name for name, _ in sample_roster]
-
-        start = time.time()
-        for raw_name, expected_name, confidence in ocr_results:
-            # Try ML matching
-            matched_name, score, _ = ml_matcher.match(raw_name, roster_names)
-
-            if matched_name and matched_name == expected_name:
-                result.correct_matches += 1
-                result.ml_matches += 1
-            elif not matched_name:
-                result.no_matches += 1
-
-            result.ml_match_latency_total += time.time() - start
-            start = time.time()
-
-        accuracy = (result.correct_matches / result.total_names) * 100
-        avg_latency = result.ml_match_latency_total / result.total_names
-
-        print(f"\nML Matching Results:")
-        print(f"  Total names: {result.total_names}")
-        print(f"  Correct matches: {result.correct_matches}")
-        print(f"  ML matches: {result.ml_matches}")
-        print(f"  No matches: {result.no_matches}")
-        print(f"  Accuracy: {accuracy:.2f}%")
-        print(f"  Average latency: {avg_latency*1000:.2f}ms")
-
-        # ML matching may have lower accuracy without fine-tuning
-        # This is more of a performance test than accuracy test
-        print(f"  Note: ML accuracy baseline without fine-tuning")
-
     def test_ocr_correction_effectiveness(self, sample_roster):
         """Benchmark OCR correction effectiveness."""
         correction_engine = OCRCorrectionEngine(
@@ -314,19 +258,9 @@ class TestOCRAccuracyBenchmark:
         assert effectiveness >= 80, "OCR correction effectiveness should be at least 80%"
 
     def test_performance_comparison(self, sample_roster):
-        """Compare performance between RapidFuzz and ML matching."""
+        """Benchmark RapidFuzz matching performance."""
         matcher = Matcher()
-        ml_matcher = MLMatcher()
 
-        # Pre-load ML model to avoid cold-start bias
-        roster_names = [name for name, _ in sample_roster]
-        ml_matcher._load_model()
-
-        # Generate embeddings once (caching behavior)
-        for name in roster_names:
-            ml_matcher.get_embedding(name)
-
-        # Test RapidFuzz only
         ocr_results = [
             ("Ahmed Mohameed", "Ahmed Mohamed", 0.85),
             ("Mohmmed Ali", "Mohamed Ali", 0.80),
@@ -352,22 +286,7 @@ class TestOCRAccuracyBenchmark:
             )
             rapidfuzz_times.append(time.time() - start)
 
-        # Test ML matching (with cached embeddings)
-        ml_times = []
-        for raw_name, _, confidence in ocr_results:
-            start = time.time()
-            ml_matcher.match(raw_name, roster_names)
-            ml_times.append(time.time() - start)
-
         avg_rapidfuzz = sum(rapidfuzz_times) / len(rapidfuzz_times)
-        avg_ml = sum(ml_times) / len(ml_times)
-        slowdown = (avg_ml / avg_rapidfuzz) * 100
 
-        print(f"\nPerformance Comparison (with caching):")
+        print(f"\nPerformance:")
         print(f"  RapidFuzz average: {avg_rapidfuzz*1000:.2f}ms")
-        print(f"  ML average: {avg_ml*1000:.2f}ms")
-        print(f"  Slowdown: {slowdown:.1f}%")
-
-        # ML with caching should be reasonably competitive
-        # The test is informational - ML is slower but provides semantic matching
-        print(f"  Note: ML provides semantic matching benefits beyond pure speed")

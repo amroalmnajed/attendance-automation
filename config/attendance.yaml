@@ -61,15 +61,6 @@ attendance:
     backup_dir: db_backups          # Directory for database backups
     backup_keep_days: 30            # Keep backups for 30 days
 
-  # ML matching configuration
-  ml_matching:
-    enabled: true                   # Enable ML-based semantic matching
-    model: paraphrase-multilingual-MiniLM-L12-v2  # Sentence-transformers model
-    cache_embeddings: true          # Cache embeddings for performance
-    retrain_interval_days: 7        # Retrain model weekly on new aliases
-    threshold: 0.75                 # Cosine similarity threshold for ML matches
-    max_batch_size: 100             # Maximum names to embed in one batch
-
   # Caching configuration
   caching:
     enabled: true                   # Enable caching layer
@@ -198,9 +189,6 @@ attendance:
     skip_row_patterns:
       - '\(Ref\)\s*$'               # row label "AAAAAAAAAAAAAAAA (Ref)" in all sheets
     missing_student_policy: report  # ignore | report | mark_absent
-    use_ml: true                    # Enable ML semantic matching
-    ml_threshold: 0.75              # Cosine similarity threshold for ML matches
-    ml_margin: 0.05                 # Required margin between top 2 ML candidates for auto-accept
 
   write:
     session_check: strict           # strict: SESSION_MISMATCH blocks the whole upload

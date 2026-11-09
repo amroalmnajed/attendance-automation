@@ -131,9 +131,6 @@ class Matcher:
         margin_strong: float = 20.0,
         alias_lookup: Optional[Callable[[str], Optional[str]]] = None,
         use_phonetic: bool = True,
-        use_ml: bool = False,
-        ml_threshold: float = 0.75,
-        ml_margin: float = 0.05,
     ):
         self.t_high = t_high
         self.margin = margin
@@ -147,11 +144,6 @@ class Matcher:
         # raw paper name -> learned roster name (from human review decisions), or None.
         self.alias_lookup = alias_lookup
         self.use_phonetic = use_phonetic
-        # ML semantic matching
-        self.use_ml = use_ml
-        self.ml_threshold = ml_threshold
-        self.ml_margin = ml_margin
-        self._ml_matcher = None
         # Name pattern resolver for partial matching and nicknames
         self._pattern_resolver: Optional[NamePatternResolver] = None
 
@@ -242,12 +234,7 @@ class Matcher:
         if pattern_hit is not None:
             return pattern_hit
 
-        # Phase 2: ML semantic matching (BERT-based semantic similarity)
-        ml_hit = self._try_ml_match(raw_name, query, roster, paper_row_index, ocr_confidence, min_confidence)
-        if ml_hit is not None:
-            return ml_hit
-
-        # Phase 3: Fall back to RapidFuzz fuzzy matching
+        # Phase 3: RapidFuzz fuzzy matching
         scored: list[Candidate] = []
         for roster_name, sheet_row in roster:
             norm_roster = self._norm(roster_name)
@@ -444,89 +431,6 @@ class Matcher:
             paper_row_index=paper_row_index,
         )
 
-    def _try_ml_match(
-        self,
-        raw_name: str,
-        query: str,
-        roster: list[tuple[str, int]],
-        paper_row_index: int,
-        ocr_confidence: float,
-        min_confidence: float,
-    ) -> Optional[MatchResult]:
-        """Resolve via ML semantic matching. None → fall through to RapidFuzz."""
-        if not self.use_ml:
-            return None
-
-        # Gate 1: OCR confidence check (enforced before ML matching)
-        if ocr_confidence < min_confidence:
-            return None
-
-        # Gate 4: Token count check
-        if len(query.split()) < self.min_tokens_for_auto:
-            return None
-
-        # Lazy-load ML matcher
-        if self._ml_matcher is None:
-            try:
-                from attendance.ml_matcher import init_ml_matcher
-                self._ml_matcher = init_ml_matcher(threshold=self.ml_threshold)
-            except ImportError:
-                log.warning("ML matching requested but sentence-transformers not available")
-                self.use_ml = False
-                return None
-
-        roster_names = [name for name, _ in roster]
-        matched_name, similarity, top3 = self._ml_matcher.match(raw_name, roster_names, self.ml_threshold)
-
-        if matched_name is None:
-            return None
-
-        # Gate 5: Ambiguity margin check
-        if len(top3) >= 2:
-            top1_score = top3[0][1]
-            top2_score = top3[1][1]
-            margin = top1_score - top2_score
-            if margin < self.ml_margin:
-                return None
-
-        # Find the roster entry for the matched name
-        hit = next(((n, r) for n, r in roster if n == matched_name), None)
-        if hit is None:
-            return None
-
-        # Convert similarity (0-1) to score (0-100)
-        score = similarity * 100.0
-        cand = Candidate(roster_name=hit[0], roster_row=hit[1], score=score)
-        if self._claimed_lock:
-            with self._claimed_lock:
-                collision = hit[1] in self._claimed
-                if not collision:
-                    self._claimed.add(hit[1])
-        else:
-            collision = hit[1] in self._claimed
-            if not collision:
-                self._claimed.add(hit[1])
-
-        # Build top3 candidates with roster rows
-        top3_candidates = []
-        for name, sim in top3:
-            roster_entry = next(((n, r) for n, r in roster if n == name), None)
-            if roster_entry:
-                top3_candidates.append(
-                    Candidate(roster_name=roster_entry[0], roster_row=roster_entry[1], score=sim * 100.0)
-                )
-
-        return MatchResult(
-            decision=MatchDecision.REVIEW if collision else MatchDecision.AUTO_ACCEPT,
-            reason=ReasonCode.MATCH_ROSTER_COLLISION if collision else ReasonCode.OK,
-            best=cand,
-            top3=top3_candidates[:3],
-            raw_name=raw_name,
-            normalized_query=query,
-            paper_row_index=paper_row_index,
-        )
-
-
 def build_matcher(cfg: dict, alias_lookup: Optional[Callable[[str], Optional[str]]] = None) -> Matcher:
     """Construct a Matcher from the config dict (attendance.match section)."""
     t_soft = cfg.get("t_soft")
@@ -541,9 +445,6 @@ def build_matcher(cfg: dict, alias_lookup: Optional[Callable[[str], Optional[str
         weight_sort=float(cfg.get("weights", {}).get("token_sort", 0.5)),
         weight_set=float(cfg.get("weights", {}).get("token_set", 0.5)),
         use_phonetic=bool(cfg.get("use_phonetic", cfg.get("phonetic", True))),
-        use_ml=bool(cfg.get("use_ml", False)),
-        ml_threshold=float(cfg.get("ml_threshold", 0.75)),
-        ml_margin=float(cfg.get("ml_margin", 0.05)),
     )
 
 

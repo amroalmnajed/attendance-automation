@@ -3,7 +3,6 @@
 Cache types:
   - Roster data: TTL 60 seconds (matches existing session_resolver cache)
   - Session info: TTL 60 seconds
-  - ML model embeddings: Persistent cache (no expiration)
   - OCR corrections: Persistent cache
   - Permission checks: TTL 300 seconds
 
@@ -41,7 +40,7 @@ class CacheEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     cache_key: Mapped[str] = mapped_column(String(500), unique=True, nullable=False, index=True)
-    cache_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # roster, session, embedding, ocr, permission
+    cache_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # roster, session, ocr, permission, pattern
     value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded value
     value_bytes: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)  # Pickle-encoded for complex objects
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
@@ -271,7 +270,7 @@ class CacheBackend:
             hit_rate = total_hits / total_requests if total_requests > 0 else 0.0
 
             entry_counts = {}
-            for cache_type in ["roster", "session", "embedding", "ocr", "permission"]:
+            for cache_type in ["roster", "session", "ocr", "permission", "pattern"]:
                 count = session.query(CacheEntry).filter(
                     CacheEntry.cache_type == cache_type
                 ).count()
@@ -351,16 +350,6 @@ def invalidate_session(course_key: str, session_num: Optional[int] = None) -> No
         get_cache().invalidate_type("session")
     else:
         get_cache().delete(f"session:{course_key}:{session_num}", "session")
-
-
-def get_embedding(name: str) -> Optional[Any]:
-    """Get ML embedding from cache (persistent, no expiration)."""
-    return get_cache().get(f"embedding:{name}", "embedding")
-
-
-def set_embedding(name: str, embedding: Any) -> None:
-    """Set ML embedding in cache (persistent, no expiration)."""
-    get_cache().set(f"embedding:{name}", embedding, "embedding", ttl_seconds=None)
 
 
 def get_ocr_correction(raw_text: str) -> Optional[str]:
