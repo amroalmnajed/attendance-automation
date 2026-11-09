@@ -369,7 +369,10 @@ def process_rows(
             log.warning("alias_usage_flush_failed", extra={"upload_id": upload_id, "error": str(exc)})
 
     if summary.flagged > 0:
-        summary.review_url = str(review_queue._dir / f"{upload_id}.json")
+        # The review queue is SQLite-backed (_Store/queue.db); there is no
+        # per-upload JSON file. review_url is a query key, not a file path:
+        # consumers pass it to ReviewQueue.list_pending(upload_id=...).
+        summary.review_url = f"upload_id:{upload_id}"
 
     log.info(
         "workflow_done",

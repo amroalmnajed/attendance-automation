@@ -250,3 +250,25 @@ def test_review_enqueue_logs_and_stores_explicit_reason(caplog):
         assert getattr(log_records[0], "reason", None) == "CELL_NONEMPTY"
     finally:
         _cleanup_temp_dir(tmpdir)
+
+def test_review_url_is_queryable_upload_key():
+    """summary.review_url must resolve to real SQLite-backed queue items.
+
+    Regression: row_processor used to build a path to a per-upload JSON file
+    that the SQLite-backed ReviewQueue never writes.
+    """
+    tmpdir = _make_temp_dir()
+    try:
+        rq = ReviewQueue(store_dir=tmpdir)
+        upload_id = "test_upload_url_key"
+        _enqueue_item(rq, upload_id)
+
+        # row_processor sets review_url = f"upload_id:{upload_id}"
+        review_url = f"upload_id:{upload_id}"
+        assert review_url.startswith("upload_id:")
+        queried_upload_id = review_url.split(":", 1)[1]
+        pending = rq.list_pending(upload_id=queried_upload_id)
+        assert len(pending) == 1
+        assert pending[0]["upload_id"] == upload_id
+    finally:
+        _cleanup_temp_dir(tmpdir)

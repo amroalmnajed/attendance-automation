@@ -427,9 +427,6 @@ class ReviewQueue:
                 except OSError:
                     pass  # Rename failed, but data is imported
 
-    def _path(self, upload_id: str) -> Path:
-        return self._dir / f"{upload_id}.json"
-
     def _load(self, upload_id: str) -> dict:
         return self._store._load(upload_id)
 
