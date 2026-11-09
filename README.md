@@ -42,13 +42,27 @@ python -m attendance.cli --help
 ## Layout
 
 - `webapp/` - Streamlit web app (photo upload, paste names, Zoom, review queue, viewer/reports, admin).
-- `attendance/pipeline.py` - OCR -> match -> write pipeline. `ocr.py`, `matcher.py`, `writer.py`, `session_resolver.py`.
+- `attendance/row_processor.py` - Per-row OCR -> match -> write pipeline.
+- `attendance/image_workflow.py`, `attendance/text_workflow.py`, `attendance/zoom_workflow.py` - Photo, paste-text and Zoom ingestion workflows.
+- `attendance/matcher.py` - Fuzzy matching of OCR names against the roster.
+- `attendance/writer.py` - Google Sheets writer.
+- `attendance/session_resolver.py` - Session/time resolution for attendance marks.
+- `attendance/review_queue.py` - Review queue for uncertain matches.
 - `attendance/review_cards.py` - Review card formatting and traffic-light scoring.
 - `attendance/review_crop.py` - Context crop image generation for flagged items.
 - `attendance/config_runtime.py` - Pure runtime configuration and error messaging.
 - `attendance/cli.py` - Command-line interface.
-- `core/` - Auth, logging, notifier.
-- `HANDOFF.md` / `PROJECT_CONTEXT.md` - Working notes for whoever continues the project.
+- `core/` - Auth, logging, notifier, paths.
+
+## Runtime data
+
+Learned aliases, review queue and DBs live in `DATA_DIR` (default `./data`; Railway: mount a Volume at `/app/data`).
+
+## Dev setup
+
+```bash
+pip install -r requirements-dev.txt
+```
 
 ## Test
 
