@@ -17,3 +17,7 @@ jobs:
       - run: ruff check .
       - run: pip-audit -r requirements.txt
       - run: pytest -q --cov=attendance --cov-fail-under=65
+      - name: Alembic migration drift check
+        run: |
+          alembic upgrade head
+          alembic check
