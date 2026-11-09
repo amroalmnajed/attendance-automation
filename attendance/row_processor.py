@@ -74,6 +74,15 @@ def _process_ocr_row(
     raw_stripped = ocr_row.raw_name.strip()
     raw_clean = raw_stripped.lower()
     if not raw_clean or len(raw_stripped) < MIN_CHARS or raw_clean in NOISE_WORDS:
+        log.info(
+            "ocr_row_dropped",
+            extra={
+                "upload_id": upload_id,
+                "row_index": ocr_row.row_index,
+                "raw_name": raw_stripped[:80],
+                "reason": "empty" if not raw_clean else ("too_short" if len(raw_stripped) < MIN_CHARS else "noise_word"),
+            },
+        )
         return None, None, candidate_rows
 
     match_result = matcher.match(

@@ -151,6 +151,47 @@ div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] {
   border-radius: var(--radius-sm);
 }
 
+/* Page headers */
+h1, h2, h3 {
+  letter-spacing: -0.01em;
+}
+
+/* Captions / muted text */
+[data-testid="stCaptionContainer"],
+small {
+  color: var(--color-text-muted);
+}
+
+/* Sidebar polish */
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #16213a 0%, #1e293b 100%);
+}
+
+[data-testid="stSidebar"] h2 {
+  color: #fff;
+}
+
+/* Radio nav items look like nav links */
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+  background-color: rgba(99, 102, 241, 0.12);
+}
+
+/* Login / centered content */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  border-radius: var(--radius-md);
+}
+
+/* Status chips get subtle glow */
+.status-chip-success { box-shadow: 0 0 8px rgba(16, 185, 129, 0.15); }
+.status-chip-warning { box-shadow: 0 0 8px rgba(245, 158, 11, 0.15); }
+.status-chip-danger  { box-shadow: 0 0 8px rgba(239, 68, 68, 0.15); }
+
 /* Smooth scroll behavior */
 html {
   scroll-behavior: smooth;

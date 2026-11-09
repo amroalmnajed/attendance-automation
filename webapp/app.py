@@ -27,6 +27,19 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+def _inject_custom_css() -> None:
+    """Load webapp/static/style.css into the page."""
+    css_path = Path(__file__).resolve().parent / "static" / "style.css"
+    try:
+        css = css_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
+
+_inject_custom_css()
+
 from webapp.runtime import configure_runtime_secrets  # noqa: E402
 
 configure_runtime_secrets(st)
