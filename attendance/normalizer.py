@@ -75,6 +75,18 @@ def _load_variants(path: str = "config/name_variants.yaml") -> dict[str, str]:
     return table
 
 
+def reload_variant_tables(path: str = "config/name_variants.yaml") -> dict[str, str]:
+    """Clear and reload the module-level variant caches.
+
+    Call after name_variants.yaml is edited at runtime (e.g. the webapp's
+    name-management save) so changes take effect without a process restart.
+    """
+    global _variants_table, _phrase_table
+    _variants_table = None
+    _phrase_table = []
+    return _load_variants(path)
+
+
 # ─── Public functions ─────────────────────────────────────────────────────────
 
 def normalize_latin(text: str) -> str:

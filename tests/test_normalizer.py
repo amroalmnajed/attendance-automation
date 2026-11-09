@@ -206,3 +206,22 @@ def test_suggest_variants_deduplicates():
         assert mohmad_suggestion["confirmations"] == 5
     finally:
         os.unlink(tmp_path)
+
+
+def test_reload_variant_tables_picks_up_new_variant():
+    import attendance.normalizer as nm
+
+    data = {"given_name_variants": {"Zainab": ["Zeinab"]}}
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+    ) as f:
+        import yaml
+        yaml.safe_dump(data, f)
+        tmp_path = f.name
+
+    try:
+        nm.reload_variant_tables(tmp_path)
+        assert "zainab" in nm.normalize_for_matching("Zeinab Salem")
+    finally:
+        os.unlink(tmp_path)
+        nm.reload_variant_tables()  # restore default config table

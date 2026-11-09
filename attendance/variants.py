@@ -207,6 +207,11 @@ def approve(paper_token: str, roster_token: str, variants_path: str) -> str:
     if p.exists():
         shutil.copy2(p, p.with_name(p.name + ".bak"))
     p.write_text(new_text, encoding="utf-8", newline="")
+    try:
+        from attendance import normalizer
+        normalizer.reload_variant_tables(str(p))
+    except Exception:
+        pass
     return "added"
 
 
