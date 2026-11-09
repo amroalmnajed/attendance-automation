@@ -15,6 +15,7 @@ from typing import Optional
 
 from attendance.db import SessionLocal, Pattern
 from attendance.normalizer import normalize_for_matching
+from core.paths import data_path
 
 
 class SuggestionEngine:
@@ -260,7 +261,7 @@ def import_aliases_to_patterns(aliases_path: str | Path, course_id: int) -> int:
     import json
     from attendance.db import get_session, Course
 
-    aliases_path = Path(aliases_path)
+    aliases_path = data_path(aliases_path)
     if not aliases_path.exists():
         return 0
 

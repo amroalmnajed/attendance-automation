@@ -1,5 +1,6 @@
    #!/bin/sh
    set -e
+export DATA_DIR="${DATA_DIR:-/app/data}"
 
    if [ -z "$GOOGLE_CREDENTIALS_B64" ]; then
      echo "ERROR: GOOGLE_CREDENTIALS_B64 is not set" >&2

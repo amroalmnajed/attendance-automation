@@ -21,6 +21,7 @@ from typing import Any, Callable, Optional
 import yaml
 
 from core.logger import get_logger
+from core.paths import data_path
 
 log = get_logger("dead_letter")
 
@@ -133,7 +134,7 @@ class DeadLetterQueue:
             db_path: Path to the SQLite database (default: review_queue/dead_letter.db)
         """
         if db_path is None:
-            db_path = Path("review_queue") / "dead_letter.db"
+            db_path = data_path("dead_letter.db")
         self._db_path = db_path
         self._config = _load_config()
         self._init_db()

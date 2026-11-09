@@ -16,12 +16,19 @@ from typing import Optional
 
 from attendance._fslock import atomic_write_json, file_lock
 from attendance.normalizer import normalize_for_matching
+from core.paths import data_path
 
 
 class AliasStore:
     def __init__(self, path: str = "config/learned_aliases.json", min_confirmations: int = 1):
-        self._path = Path(path)
+        self._path = data_path(path)
         self.min_confirmations = max(1, int(min_confirmations))
+        # One-time migration: copy the legacy config/learned_aliases.json into data_dir().
+        if self._path.name == "learned_aliases.json" and not self._path.exists():
+            legacy = Path("config") / "learned_aliases.json"
+            if legacy.exists():
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(legacy, self._path)
         # Feature 7: dates live in a SIDECAR file (<name>.meta.json) so learned_aliases.json keeps
         # its exact old format ({course: {key: {roster_name: votes}}}) and old code still reads it.
         self._meta_path = self._path.with_name(self._path.stem + ".meta.json")

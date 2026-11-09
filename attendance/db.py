@@ -43,6 +43,8 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
+from core.paths import data_path
+
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
@@ -293,16 +295,12 @@ def _get_default_db_path() -> Path:
             with config_path.open(encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
                 db_path = cfg.get("attendance", {}).get("database", {}).get("path", "attendance.db")
-                db_path = Path(db_path)
-                if not db_path.is_absolute():
-                    db_path = repo_root / db_path
-                return db_path
+                return data_path(db_path)
     except Exception:
         pass
 
-    # Fallback to attendance.db in repo root
-    repo_root = Path(__file__).resolve().parents[1]
-    return repo_root / "attendance.db"
+    # Fallback to attendance.db in the data directory
+    return data_path("attendance.db")
 
 
 def init_db(db_path: str | Path | None = None, echo: bool = False) -> None:
@@ -316,7 +314,7 @@ def init_db(db_path: str | Path | None = None, echo: bool = False) -> None:
 
     if db_path is None:
         db_path = _get_default_db_path()
-    db_path = Path(db_path)
+    db_path = data_path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Dispose existing engine to prevent connection pool leaks

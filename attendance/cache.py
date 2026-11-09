@@ -24,6 +24,8 @@ from typing import Any, Optional
 from sqlalchemy import Boolean, DateTime, Float, Integer, LargeBinary, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+from core.paths import data_path
+
 
 class Base(DeclarativeBase):
     """Base class for cache models."""
@@ -56,7 +58,7 @@ class CacheBackend:
         Args:
             cache_path: Path to the cache database file
         """
-        cache_path = Path(cache_path)
+        cache_path = data_path(cache_path)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._engine = create_engine(f"sqlite:///{cache_path}", connect_args={"check_same_thread": False})

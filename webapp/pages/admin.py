@@ -12,6 +12,7 @@ import yaml
 from attendance.config_runtime import _user_error_message
 from attendance.session_resolver import resolve as session_resolve
 from attendance.writer import WriteCell, batch_write
+from core.paths import data_path
 from webapp.config import CONFIG_PATH, COURSES
 
 
@@ -162,7 +163,7 @@ def _render_absent_offer() -> None:
     from attendance.absent import load_pending, mark_missing_absent
 
     cfg = _load_config()
-    review_dir = cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")
+    review_dir = str(data_path(cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")))
     absent_store = Path(review_dir) / "_absent"
 
     pending_files = list(absent_store.glob("*.json")) if absent_store.exists() else []

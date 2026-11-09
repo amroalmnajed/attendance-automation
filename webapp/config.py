@@ -17,6 +17,8 @@ from typing import Optional
 
 import yaml
 
+from core.paths import data_path
+
 # ---------------------------------------------------------------------------
 # Streamlit is optional so this module is importable in plain pytest sessions.
 # ---------------------------------------------------------------------------
@@ -307,7 +309,7 @@ def detect_next_session_number(course_key: str, cfg: Optional[dict] = None) -> i
     if detected is None:
         try:
             from attendance import history as history_mod
-            entries = history_mod.entries("review_queue", course_key)
+            entries = history_mod.entries(str(data_path("review_queue")), course_key)
             valid_sessions = [int(e["session"]) for e in entries if str(e.get("session", "")).isdigit()]
             if valid_sessions:
                 detected = max(valid_sessions) + 1

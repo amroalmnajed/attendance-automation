@@ -24,6 +24,7 @@ from attendance.session_resolver import SheetSession
 from attendance.utils.column_utils import col_letter_to_index
 from attendance.writer import WriteCell
 from core.logger import get_logger
+from core.paths import data_path
 
 log = get_logger("review_queue")
 CAIRO = pytz.timezone("Africa/Cairo")
@@ -407,7 +408,7 @@ class _Store:
 
 class ReviewQueue:
     def __init__(self, store_dir: str = "review_queue"):
-        self._dir = Path(store_dir)
+        self._dir = data_path(store_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._store = _Store(self._dir / "queue.db")
         # One-time import of existing JSON files

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from attendance.normalizer import normalize_for_matching
+from core.paths import data_path
 
 
 # ─── Nickname dictionary ───────────────────────────────────────────────────────
@@ -324,7 +325,7 @@ def learn_from_aliases(aliases_path: str | Path) -> dict[str, str]:
     """
     import json
 
-    aliases_path = Path(aliases_path)
+    aliases_path = data_path(aliases_path)
     if not aliases_path.exists():
         return {}
 

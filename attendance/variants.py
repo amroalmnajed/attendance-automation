@@ -20,6 +20,7 @@ import yaml
 from attendance._fslock import atomic_write_json, file_lock
 from attendance.normalizer import normalize_for_matching, normalize_latin
 from core.logger import get_logger
+from core.paths import data_path
 
 log = get_logger("variants")
 
@@ -85,7 +86,7 @@ class VariantSuggestions:
     """Pending / approved / rejected variant suggestions (JSON, names tokens only + one example)."""
 
     def __init__(self, path: str = "config/variant_suggestions.json"):
-        self._path = Path(path)
+        self._path = data_path(path)
 
     def _load(self) -> list[dict]:
         try:

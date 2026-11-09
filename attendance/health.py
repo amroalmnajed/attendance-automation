@@ -26,6 +26,7 @@ from attendance import roles
 from attendance._fslock import atomic_write_json, file_lock
 from core import notifier
 from core.logger import get_logger
+from core.paths import data_path
 
 log = get_logger("health")
 
@@ -70,7 +71,7 @@ def settings(cfg: dict) -> dict:
 
 
 def review_dir_of(cfg: dict) -> str:
-    return str((((cfg or {}).get("attendance") or {}).get("review") or {}).get("local_dir") or "review_queue")
+    return str(data_path((((cfg or {}).get("attendance") or {}).get("review") or {}).get("local_dir") or "review_queue"))
 
 
 def configure(cfg: dict) -> None:

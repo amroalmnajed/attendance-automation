@@ -30,6 +30,7 @@ from attendance.db import (
 )
 from attendance.audit import log_action
 from attendance.session_resolver import resolve
+from core.paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ class DataMigrator:
         """
         logger.info(f"Importing learned aliases from {aliases_file}")
 
-        aliases_path = Path(aliases_file)
+        aliases_path = data_path(aliases_file)
         if not aliases_path.exists():
             logger.warning(f"Aliases file not found: {aliases_file}")
             return {"aliases_imported": 0, "courses": {}}

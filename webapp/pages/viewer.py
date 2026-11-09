@@ -15,6 +15,7 @@ from attendance.history import count_marks, entries
 from attendance.reporter import generate_session_report, generate_streaks_report
 from attendance.review_queue import ReviewQueue
 from attendance.session_resolver import resolve as session_resolve
+from core.paths import data_path
 from webapp.config import CONFIG_PATH, COURSES
 
 
@@ -39,7 +40,7 @@ def _page_viewer() -> None:
 
     course_label = COURSES[course_key].label
     cfg = _load_config()
-    review_dir = cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")
+    review_dir = str(data_path(cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")))
 
     st.subheader(f"Course: {course_label}")
 

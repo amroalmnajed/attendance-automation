@@ -4,7 +4,9 @@ __pycache__/
 *.pyo
 
 # Service account keys — NEVER commit
-*.json
+attendance-[0-9]*-*.json
+service_account*.json
+*credentials*.json
 !config/name_variants.yaml
 
 # Logs
@@ -50,6 +52,13 @@ id_ed25519*
 
 # Runtime data
 review_images/
+*.db
+data/
+.benchmarks/
+.ruff_cache/
+nul
+config/learned_aliases*.json
+config/variant_suggestions.json
 
 # pytest temp dirs
 .temp/

@@ -24,6 +24,7 @@ from attendance.resolver_ops import resolve_item
 from attendance.session_resolver import resolve as session_resolve
 from attendance.session_patterns import init_pattern_engine
 from attendance.suggestions import init_suggestion_engine
+from core.paths import data_path
 from webapp.config import CONFIG_PATH
 
 
@@ -174,7 +175,7 @@ def _page_review() -> None:
 
     # Load config
     cfg = _load_config()
-    review_dir = cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")
+    review_dir = str(data_path(cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")))
 
     # Initialize queue
     queue = ReviewQueue(store_dir=review_dir)

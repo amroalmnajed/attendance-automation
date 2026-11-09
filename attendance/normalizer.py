@@ -14,6 +14,8 @@ from typing import Optional
 
 import yaml
 
+from core.paths import data_path
+
 
 # ─── Attendance mark map ──────────────────────────────────────────────────────
 
@@ -231,9 +233,8 @@ def suggest_variants_from_aliases(
       python -c "from attendance.normalizer import suggest_variants_from_aliases; import json; print(json.dumps(suggest_variants_from_aliases(), indent=2, ensure_ascii=False))"
     """
     import json
-    from pathlib import Path
 
-    p = Path(alias_path)
+    p = data_path(alias_path)
     if not p.exists():
         return []
 

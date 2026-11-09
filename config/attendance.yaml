@@ -181,13 +181,13 @@ attendance:
     margin_strong: 20
     # Learned aliases: reviewer decisions become future auto-accepts (per course).
     learn_aliases: true
-    aliases_file: config/learned_aliases.json
+    aliases_file: learned_aliases.json
     alias_min_confirmations: 1      # raise to 2 to require two identical confirmations
     # Feature 15: spelling differences seen in reviewer decisions are collected as SUGGESTIONS here
     # (never applied automatically). Review/approve them with:  aliases variants review
     variant_learning:
       enabled: true
-      suggestions_file: config/variant_suggestions.json
+      suggestions_file: variant_suggestions.json
       min_similarity: 0.7           # how alike two spellings must be to be suggested as the same name
     alias_stale_days: 90            # aliases not used / not confirmed for this long are flagged as old
     weights:

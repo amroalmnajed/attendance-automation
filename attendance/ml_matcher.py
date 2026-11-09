@@ -23,6 +23,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 from attendance.cache import get_embedding, set_embedding
+from core.paths import data_path
 
 
 class MLMatcher:
@@ -206,7 +207,7 @@ def train_from_aliases(
         )
 
     # Load learned aliases
-    aliases_path = Path(aliases_path)
+    aliases_path = data_path(aliases_path)
     with open(aliases_path, "r", encoding="utf-8") as f:
         aliases_data = json.load(f)
 

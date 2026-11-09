@@ -14,6 +14,7 @@ import yaml
 
 from attendance.history import count_marks, entries
 from attendance.review_queue import ReviewQueue
+from core.paths import data_path
 from webapp.config import CONFIG_PATH
 
 
@@ -52,7 +53,7 @@ def _page_dashboard() -> None:
 
     # Load config
     cfg = _load_config()
-    review_dir = cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")
+    review_dir = str(data_path(cfg.get("attendance", {}).get("review", {}).get("local_dir", "review_queue")))
     course = st.session_state.get("selected_course")
 
     if not course:
