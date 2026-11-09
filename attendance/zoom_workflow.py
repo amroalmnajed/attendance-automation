@@ -17,8 +17,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from attendance import health as health_mod
 from attendance.ocr import OcrRow
 from attendance.zoom_csv import determine_session_type
@@ -36,24 +34,11 @@ from attendance.zoom_csv import (
 )
 from attendance.zoom_api import fetch_past_meeting_participants
 from attendance.utils.progress import ProgressFn, STAGE_READING
+from attendance.workflow_common import load_config
 from core.logger import get_logger
 from core.notifier import RunSummary
 
 log = get_logger("zoom_workflow")
-
-
-def load_config(path: str = "config/attendance.yaml") -> dict:
-    try:
-        with open(path, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-    except FileNotFoundError:
-        raise RuntimeError(f"Configuration file not found: {path}")
-    from attendance.config_model import ConfigError, validate_cfg
-    try:
-        validate_cfg(cfg)
-    except ConfigError as exc:
-        raise RuntimeError(str(exc)) from exc
-    return cfg
 
 
 def _parse_manual_time(time_str: str, base_date: Optional[date] = None) -> Optional[datetime]:

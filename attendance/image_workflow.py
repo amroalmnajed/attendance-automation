@@ -16,35 +16,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from attendance import health as health_mod
 from attendance.normalizer import normalize_for_matching
 from attendance.ocr import OcrRow, OcrUnavailableError, build_provider
 from attendance.photos import merge_photo_rows
 from attendance.preprocess import prepare
 from attendance.row_processor import process_rows
-from attendance.session_resolver import SheetSession, resolve
+from attendance.session_resolver import SheetSession
 from attendance.utils.progress import ProgressFn, STAGE_READING, _emit
 from attendance.utils.upload_utils import generate_upload_id
+from attendance.workflow_common import load_config, resolve_roster_for_ocr
 from core.logger import get_logger
 from core.notifier import RunSummary
 
 log = get_logger("image_workflow")
-
-
-def load_config(path: str = "config/attendance.yaml") -> dict:
-    try:
-        with open(path, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-    except FileNotFoundError:
-        raise RuntimeError(f"Configuration file not found: {path}")
-    from attendance.config_model import ConfigError, validate_cfg
-    try:
-        validate_cfg(cfg)
-    except ConfigError as exc:
-        raise RuntimeError(str(exc)) from exc
-    return cfg
 
 
 def _second_pass_settings(ocr_cfg: dict) -> dict:
@@ -337,15 +322,10 @@ def run(
     session_info: Optional[SheetSession] = None
     roster_names: Optional[list[str]] = None
     if ocr_cfg.get("send_roster_to_provider", False):
-        try:
-            session_info = resolve(course_key=course, session_num=session_num, session_type=session_type, cfg=cfg)
-            roster_names = [name for name, _ in session_info.roster]
-        except Exception as exc:
-            # Don't let an early resolve failure kill the run here — fall back to
-            # resolving again (and surfacing the real error) inside process_rows.
-            log.warning("early_session_resolve_failed", extra={"error": str(exc), "upload_id": upload_id})
-            session_info = None
-            roster_names = None
+        session_info, roster_names = resolve_roster_for_ocr(
+            cfg=cfg, course=course, session_num=session_num,
+            session_type=session_type, upload_id=upload_id,
+        )
 
     try:
         ocr_rows = _read_sheet(image_bytes=image_bytes, provider=provider, roster_names=roster_names,
@@ -438,13 +418,10 @@ def run_multi(
     session_info: Optional[SheetSession] = None
     roster_names: Optional[list[str]] = None
     if ocr_cfg.get("send_roster_to_provider", False):
-        try:
-            session_info = resolve(course_key=course, session_num=session_num, session_type=session_type, cfg=cfg)
-            roster_names = [name for name, _ in session_info.roster]
-        except Exception as exc:
-            log.warning("early_session_resolve_failed", extra={"error": str(exc), "upload_id": upload_id})
-            session_info = None
-            roster_names = None
+        session_info, roster_names = resolve_roster_for_ocr(
+            cfg=cfg, course=course, session_num=session_num,
+            session_type=session_type, upload_id=upload_id,
+        )
 
     per_photo: list[list[OcrRow]] = []
 

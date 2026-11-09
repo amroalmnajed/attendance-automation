@@ -13,29 +13,14 @@ from __future__ import annotations
 import hashlib
 from typing import Optional
 
-import yaml
-
 from attendance import health as health_mod
 from attendance.ocr import OcrRow
 from attendance.row_processor import process_rows
+from attendance.workflow_common import load_config
 from core.logger import get_logger
 from core.notifier import RunSummary
 
 log = get_logger("text_workflow")
-
-
-def load_config(path: str = "config/attendance.yaml") -> dict:
-    try:
-        with open(path, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-    except FileNotFoundError:
-        raise RuntimeError(f"Configuration file not found: {path}")
-    from attendance.config_model import ConfigError, validate_cfg
-    try:
-        validate_cfg(cfg)
-    except ConfigError as exc:
-        raise RuntimeError(str(exc)) from exc
-    return cfg
 
 
 def run_text(
