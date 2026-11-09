@@ -163,6 +163,7 @@ _PAGE_RENDERERS: dict[str, object] = {
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    _inject_custom_css()
     if not require_login():
         return
     if CONFIG_ERROR:
