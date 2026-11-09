@@ -62,6 +62,8 @@ Learned aliases, review queue and DBs live in `DATA_DIR` (default `./data`; Rail
 
 ```bash
 pip install -r requirements-dev.txt
+pre-commit install   # one-time: enables gitleaks + hygiene hooks
+# or: ./scripts/setup-dev.sh  (does both)
 ```
 
 ## Test

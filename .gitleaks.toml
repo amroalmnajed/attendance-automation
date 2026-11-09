@@ -7,16 +7,13 @@ title = "gitleaks config"
 useDefaultConfig = true
 
 # Allowlist for legitimate files that might trigger false positives
-[[allowlist]]
-description = "Allow template files with placeholders"
+[allowlist]
+description = "Allow template files with placeholders and placeholder values"
 paths = [
   '''webapp/\.streamlit/secrets\.toml\.example''',
   '''\.env\.example''',
   '''\.env\.template''',
 ]
-
-[[allowlist]]
-description = "Allow placeholder values"
 regexes = [
   '''YOUR_.*_HERE''',
   '''CHANGE_THIS''',

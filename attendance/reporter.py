@@ -28,7 +28,7 @@ class AuditRecord:
     def col(self) -> str:
         match = re.match(r"([A-Z]+)(\d+)", self.cell)
         return match.group(1) if match else ""
-    
+
     @property
     def row(self) -> int:
         match = re.match(r"([A-Z]+)(\d+)", self.cell)
@@ -65,18 +65,18 @@ def plan_revert(upload_id: str, audit_records: list[AuditRecord]) -> list[Revert
     for r in audit_records:
         if not r.dry_run:
             history_by_cell[r.cell].append(r)
-            
+
     plan = []
     for cell, history in history_by_cell.items():
         writes_by_target = [r for r in history if r.upload_id == upload_id]
         if not writes_by_target:
             continue
-            
+
         revert_to = writes_by_target[0].old_value
         last_write_idx = history.index(writes_by_target[-1])
         overwritten = last_write_idx < len(history) - 1
         current_val = history[-1].new_value
-        
+
         plan.append(RevertPlanCell(
             cell=cell,
             sheet_row=writes_by_target[0].row,
@@ -92,7 +92,7 @@ def get_course_sheet(course: str, cfg: dict) -> gspread.Worksheet:
     sheet_id_env = course_cfg["sheet_id_env"]
     sheet_id = os.environ[sheet_id_env]
     tab = course_cfg["tab"]
-    
+
     creds = get_credentials()
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(sheet_id)
@@ -102,12 +102,12 @@ def generate_session_report(course: str, session: int, cfg: dict, review_store_d
     from attendance.session_resolver import resolve
     session_info = resolve(course, session, None, cfg)
     ws = session_info.get_worksheet()
-    
+
     # 1. Absentees
     col_idx = 0
     for ch in session_info.session_col.upper():
         col_idx = col_idx * 26 + (ord(ch) - ord("A") + 1)
-    
+
     col_data = ws.col_values(col_idx)
     absentees = []
     present_count = 0
@@ -117,7 +117,7 @@ def generate_session_report(course: str, session: int, cfg: dict, review_store_d
             absentees.append(name)
         elif val.strip():
             present_count += 1
-            
+
     # 2. Review backlog
     pending_items = 0
     try:
@@ -156,27 +156,27 @@ def generate_streaks_report(course: str, consecutive_absences: int, cfg: dict) -
     all_values = ws.get_all_values()
     if len(all_values) < header_row:
         return []
-    
+
     header = all_values[header_row - 1]
     layout = course_cfg.get("layout", "single")
     session_pattern_str = course_cfg["session_header_pattern"] if layout == "single" else course_cfg.get("attendance_header_pattern", r"^S(\d+) Attendance$")
     session_pattern = re.compile(session_pattern_str)
-    
+
     sessions = []
     for col_idx, cell in enumerate(header):
         m = session_pattern.match(cell.strip())
         if m:
             sessions.append((int(m.group(1)), col_idx))
-    
+
     sessions.sort(key=lambda x: x[0])
     last_sessions = sessions[-consecutive_absences:]
     if len(last_sessions) < consecutive_absences:
         return []
-    
+
     # Resolve roster
     from attendance.session_resolver import resolve
     session_info = resolve(course, last_sessions[-1][0], None, cfg)
-    
+
     streaks = []
     for name, row in session_info.roster:
         missed = 0
@@ -188,5 +188,5 @@ def generate_streaks_report(course: str, consecutive_absences: int, cfg: dict) -
                 break
         if missed == consecutive_absences:
             streaks.append({"name": name, "row": row, "missed": missed})
-            
+
     return streaks

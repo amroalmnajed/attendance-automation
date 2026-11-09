@@ -14,8 +14,8 @@ Phase 4: Step-by-step setup, environment configuration, scheduling, and go-live 
 | Free.ai API key | free.ai dashboard | free.ai |
 | Gemini API key (fallback) | Free tier or paid | aistudio.google.com |
 
-> **Upgrade Python first.**  
-> `google-auth` already prints EOL warnings on Python 3.9. Run on 3.11+:  
+> **Upgrade Python first.**
+> `google-auth` already prints EOL warnings on Python 3.9. Run on 3.11+:
 > `winget install Python.Python.3.11` (Windows) or `sudo apt install python3.11` (Ubuntu).
 
 ---
@@ -407,4 +407,3 @@ automatically retries with Gemini (if `fallback_to_gemini: true`).
 python -c "from attendance.ocr import FreeAIProvider; print('FreeAIProvider OK')"
 python -c "import openai; print('openai SDK OK')"
 ```
-

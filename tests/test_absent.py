@@ -205,7 +205,7 @@ def _e2e(monkeypatch, cfg, tmp_path, course, names, col):
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     ws = FakeWS(col)
     session = fake_session(ws, course=course)
-    
+
     # Mock process_rows to simulate successful matching
     def fake_process_rows(**kw):
         summary = kw["summary"]
@@ -214,11 +214,11 @@ def _e2e(monkeypatch, cfg, tmp_path, course, names, col):
         summary.flagged = 0
         summary.sheet_url = f"https://docs.google.com/spreadsheets/d/{session.sheet_id}/edit#gid={ws.id}"
         return summary
-    
+
     monkeypatch.setattr(row_processor, "process_rows", fake_process_rows)
     monkeypatch.setattr(row_processor, "resolve", lambda **_k: session)
     monkeypatch.setattr(writer, "audit_write", lambda **_k: None)
-    
+
     summary = text_workflow.run_text(names=names, course=course, session_num=3, dry_run=False,
                                 config_path=str(cfg_path), review_store_dir=str(tmp_path / "rq"))
     return summary, ws

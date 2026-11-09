@@ -100,7 +100,7 @@ attendance:
         - {day: thu, time: "22:00"}
       g9:
         - {day: fri, time: "22:00"}
-        - {day: sat, time: "22:00"}    
+        - {day: sat, time: "22:00"}
   # Feature 13: alerts to ADMINS (never teachers) when Gemini/Sheets keep failing or review items wait too long.
   # Counts only, no names. One alert per kind per cooldown. Real uploads only (dry runs record nothing).
   # The review-age check needs the scheduler; Gemini/Sheets alerts do not. Admin command: /health

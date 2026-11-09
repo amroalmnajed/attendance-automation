@@ -42,10 +42,10 @@ def _load_config() -> dict:
 
 def _get_course_id(course_key: str) -> Optional[int]:
     """Look up course_id from course_key using the database.
-    
+
     Args:
         course_key: Course key string (e.g., "crash", "main")
-    
+
     Returns:
         Course ID (integer) or None if not found
     """
@@ -62,11 +62,11 @@ def _get_course_id(course_key: str) -> Optional[int]:
 
 def _export_selected_items(selected_items: list[dict], format: str = "csv") -> str:
     """Export selected review items to CSV or JSON format.
-    
+
     Args:
         selected_items: List of review item dictionaries
         format: Either 'csv' or 'json'
-    
+
     Returns:
         String content of the exported data
     """
@@ -88,7 +88,7 @@ def _export_selected_items(selected_items: list[dict], format: str = "csv") -> s
                 "attendance_value": "Present",  # Default
             })
         return json.dumps(export_data, indent=2, ensure_ascii=False)
-    
+
     elif format == "csv":
         # Export as CSV
         output = StringIO()
@@ -99,7 +99,7 @@ def _export_selected_items(selected_items: list[dict], format: str = "csv") -> s
         ]
         writer_csv = csv.DictWriter(output, fieldnames=fieldnames)
         writer_csv.writeheader()
-        
+
         for item in selected_items:
             writer_csv.writerow({
                 "item_id": item.get("item_id"),
@@ -114,20 +114,20 @@ def _export_selected_items(selected_items: list[dict], format: str = "csv") -> s
                 "roster_row": "",  # To be filled by user (0 for absent)
                 "attendance_value": "Present",  # Default
             })
-        
+
         return output.getvalue()
-    
+
     else:
         raise ValueError(f"Unsupported export format: {format}")
 
 
 def _import_resolutions(import_data: str, format: str = "csv") -> list[dict]:
     """Parse imported resolution data from CSV or JSON.
-    
+
     Args:
         import_data: String content of the imported data
         format: Either 'csv' or 'json'
-    
+
     Returns:
         List of resolution dictionaries with keys: item_id, resolved_name, roster_row, attendance_value
     """
@@ -142,7 +142,7 @@ def _import_resolutions(import_data: str, format: str = "csv") -> list[dict]:
                 "attendance_value": row.get("attendance_value", "Present"),
             })
         return resolutions
-    
+
     elif format == "csv":
         resolutions = []
         reader = csv.DictReader(StringIO(import_data))
@@ -154,7 +154,7 @@ def _import_resolutions(import_data: str, format: str = "csv") -> list[dict]:
                 "attendance_value": row.get("attendance_value", "Present"),
             })
         return resolutions
-    
+
     else:
         raise ValueError(f"Unsupported import format: {format}")
 
@@ -303,7 +303,7 @@ def _page_review() -> None:
 
         # Bulk export/import
         st.subheader("Bulk Export / Import")
-        
+
         # Export section
         col_export1, col_export2 = st.columns(2)
         with col_export1:
@@ -315,7 +315,7 @@ def _page_review() -> None:
                     item_id = item.get("item_id", "")
                     if st.session_state.get(f"bulk_select_{item_id}", False):
                         selected_items.append(item)
-                
+
                 if selected_items:
                     try:
                         export_content = _export_selected_items(selected_items, format=export_format)
@@ -331,7 +331,7 @@ def _page_review() -> None:
                         st.error(f"❌ Export failed: {str(e)}")
                 else:
                     st.warning("No items selected for export")
-        
+
         # Import section
         st.markdown("**Import resolutions**")
         import_file = st.file_uploader(
@@ -339,15 +339,15 @@ def _page_review() -> None:
             type=["csv", "json"],
             key="bulk_import_file"
         )
-        
+
         if import_file:
             try:
                 import_format = "json" if import_file.name.endswith(".json") else "csv"
                 import_data = import_file.read().decode("utf-8")
                 resolutions = _import_resolutions(import_data, format=import_format)
-                
+
                 st.info(f"Loaded {len(resolutions)} resolution(s) from file")
-                
+
                 # Preview first few resolutions
                 with st.expander("Preview imported resolutions"):
                     preview_data = resolutions[:5]
@@ -355,22 +355,22 @@ def _page_review() -> None:
                         st.text(f"{i}. Item ID: {res['item_id'][:8]}... → {res['resolved_name'] or 'Absent'} (row {res['roster_row']}, {res['attendance_value']})")
                     if len(resolutions) > 5:
                         st.text(f"... and {len(resolutions) - 5} more")
-                
+
                 if st.button("Apply imported resolutions", key="bulk_import_apply"):
                     applied_count = 0
                     failed_count = 0
-                    
+
                     for resolution in resolutions:
                         item_id = resolution["item_id"]
                         # Find the item in pending_items
                         item = next((i for i in pending_items if i.get("item_id") == item_id), None)
-                        
+
                         if item:
                             try:
                                 resolved_name = resolution["resolved_name"]
                                 roster_row = resolution["roster_row"]
                                 attendance_value = resolution["attendance_value"]
-                                
+
                                 # If a resolved name is provided, look up the roster row
                                 if resolved_name and roster_row == 0:
                                     course = item.get("course")
@@ -388,7 +388,7 @@ def _page_review() -> None:
                                             roster_row = match[1]
                                     except Exception:
                                         pass  # Fall back to roster_row=0 (absent)
-                                
+
                                 _resolve_item_action(
                                     item,
                                     item.get("upload_id", ""),
@@ -406,7 +406,7 @@ def _page_review() -> None:
                                 failed_count += 1
                         else:
                             failed_count += 1
-                    
+
                     if applied_count > 0:
                         st.success(f"✅ Applied {applied_count} resolution(s)")
                         if failed_count > 0:
@@ -414,7 +414,7 @@ def _page_review() -> None:
                         st.rerun()
                     else:
                         st.error("❌ No resolutions were applied")
-                        
+
             except Exception as e:
                 st.error(f"❌ Import failed: {str(e)}")
 

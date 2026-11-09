@@ -120,4 +120,3 @@ def test_detect_next_session_number_basic():
     session_num = detect_next_session_number("crash")
     assert isinstance(session_num, int)
     assert session_num >= 1
-

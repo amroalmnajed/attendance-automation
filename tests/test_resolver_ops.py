@@ -318,4 +318,3 @@ def test_undo_resolution_ignored_item_does_not_call_batch_write():
     assert res.cleared is False
     assert res.re_enqueued is True
     mock_writer.batch_write.assert_not_called()
-

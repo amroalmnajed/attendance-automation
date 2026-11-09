@@ -334,4 +334,3 @@ def detect_next_session_number(course_key: str, cfg: Optional[dict] = None) -> i
     final_val = detected if (detected and detected > 0) else 1
     _detected_sessions_cache[course_key] = (now, final_val)
     return final_val
-

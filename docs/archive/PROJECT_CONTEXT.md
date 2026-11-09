@@ -28,7 +28,7 @@
 # Data Flow & Architecture
 1. **Input**: Image path, course, session provided via CLI (or text input, or Zoom CSV).
 2. **Setup**: `session_resolver` pulls the current roster from Google Sheets.
-3. **Extraction**: 
+3. **Extraction**:
    - Image workflow: `ocr` extracts `(raw_name, status_mark)` pairs from the image (FreeAI primary, Gemini fallback).
    - Text workflow: Names parsed from text input.
    - Zoom workflow: Participants parsed from CSV or Zoom API.

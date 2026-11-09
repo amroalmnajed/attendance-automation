@@ -22,7 +22,7 @@ def _run(monkeypatch, cfg, tmp_path, marks, dry_run=False, session=3):
 
 
 def _seed(tmp_path, session, present, late=0, absent=0):
-    history.record(str(tmp_path / "rq"), "crash", session, f"up{session}", 
+    history.record(str(tmp_path / "rq"), "crash", session, f"up{session}",
                    {"present": present, "late": late, "absent": absent}, 0)
 
 

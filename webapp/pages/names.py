@@ -86,7 +86,7 @@ def _page_names() -> None:
     st.markdown(
         """
         Enter one student per line. Use the format `Name | Mark` to specify attendance marks.
-        
+
         Examples:
         - `Ahmed Ali` → Present (default)
         - `Sara | L` → Late

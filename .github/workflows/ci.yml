@@ -13,6 +13,7 @@ jobs:
           python-version-file: .python-version
           cache: pip
       - run: pip install -r requirements-dev.txt
+      - run: pre-commit run --all-files
       - run: ruff check .
       - run: pip-audit -r requirements.txt
         continue-on-error: true

@@ -8,8 +8,8 @@ During the detailed review of the Telegram bot code (`attendance/ingest.py`), th
 
 ## 2. Blocking File I/O in Async Event Loop
 - **Location:** `_send_next_review_item` (line 262) and `handle_resolution_callback` (line 290, 301).
-- **Issue:** 
-  - Opening the image file `with open(crop_path, "rb") as f:` performs blocking I/O on the main async thread. 
+- **Issue:**
+  - Opening the image file `with open(crop_path, "rb") as f:` performs blocking I/O on the main async thread.
   - `queue.list_pending(full_upload_id)` and directory globbing `Path(review_dir).glob(...)` perform synchronous filesystem operations. In a high-concurrency bot, this blocks the entire `asyncio` event loop. It should be wrapped in `run_in_executor` or `aiofiles`.
 
 ## 3. Callback Data Limit Constraints

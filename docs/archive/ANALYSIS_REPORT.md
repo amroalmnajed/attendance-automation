@@ -20,7 +20,7 @@ res = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd())
 
 ## 3. Cross-Script String Matching Failure (Architectural Flaw)
 **File**: `attendance/normalizer.py` & `attendance/matcher.py`
-**Impact**: The Gemini OCR prompt requests transliteration, but Gemini frequently hallucinates or ignores this and returns Arabic text in `raw_name` (e.g., `"عبد الرحمن احمد"`). 
+**Impact**: The Gemini OCR prompt requests transliteration, but Gemini frequently hallucinates or ignores this and returns Arabic text in `raw_name` (e.g., `"عبد الرحمن احمد"`).
 When `matcher.py` receives this, it fuzzy matches (using character-level algorithms like `token_set_ratio`) against the English Google Sheet roster. Since there's no character overlap between scripts, the score drops to 0, completely failing the match.
 **Fix**: Implement a true Arabic-to-English mapping in `name_variants.yaml` or add a phonetic/transliteration module inside `normalize_for_matching()` to process un-transliterated Arabic strings before they reach `rapidfuzz`.
 

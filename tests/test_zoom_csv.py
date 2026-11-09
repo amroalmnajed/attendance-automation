@@ -634,4 +634,3 @@ def test_run_zoom_with_manual_start_time(tmp_path, monkeypatch):
     assert len(captured_ocr_rows) == 1
     assert captured_ocr_rows[0].raw_name == "Ahmed Ali"
     assert captured_ocr_rows[0].status_mark == "Present"
-

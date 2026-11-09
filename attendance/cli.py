@@ -1041,7 +1041,7 @@ def cmd_report_session(args: argparse.Namespace) -> None:
     from attendance.reporter import generate_session_report
     cfg = _load_cfg(args.config)
     report = generate_session_report(args.course, args.session, cfg, Path(args.store_dir))
-    
+
     print(f"\n--- Session Report: {args.course.upper()} S{args.session} ---")
     print(f"Total Students: {report['total_students']}")
     print(f"Present:        {report['present']} ({report['attendance_rate']:.1f}%)")
@@ -1059,7 +1059,7 @@ def cmd_report_streaks(args: argparse.Namespace) -> None:
     from attendance.reporter import generate_streaks_report
     cfg = _load_cfg(args.config)
     streaks = generate_streaks_report(args.course, args.consecutive, cfg)
-    
+
     print(f"\n--- Chronic Absentees ({args.course.upper()} - past {args.consecutive} sessions) ---")
     if streaks:
         for s in streaks:
@@ -1072,31 +1072,31 @@ def cmd_report_streaks(args: argparse.Namespace) -> None:
 def cmd_revert(args: argparse.Namespace) -> None:
     from attendance.reporter import read_audit_log, plan_revert
     from attendance.writer import WriteCell, batch_write
-    
+
     audit_records = read_audit_log()
     plan = plan_revert(args.upload_id, audit_records)
-    
+
     if not plan:
         print(f"No non-dry-run audit records found for upload_id {args.upload_id}")
         return
-        
+
     # We must group the writes by course/session/tab to do batch_write
     # For simplicity, we assume an upload_id corresponds to a single course/session.
     # The audit record has course and cell. We can just use the first record's course.
     writes_by_target = [r for r in audit_records if r.upload_id == args.upload_id]
     if not writes_by_target:
         return
-        
+
     course = writes_by_target[0].course
     # We can't easily get session_num from audit, but we can reconstruct it from the column?
     # Or just resolve the sheet and write directly using gspread?
     # Actually, batch_write requires a SheetSession, which needs course and session_num.
     # Since we know the sheet_id and tab from AuditRecord, we could construct a dummy SheetSession.
     cfg = _load_cfg(args.config)
-    
+
     cells_to_write = []
     has_conflicts = False
-    
+
     print(f"\nRevert Plan for upload_id: {args.upload_id}")
     print(f"  {'Cell':<5}  {'Current':<15}  {'Revert To':<15}  {'Status'}")
     print(f"  {'-'*5}  {'-'*15}  {'-'*15}  {'-'*15}")
@@ -1105,12 +1105,12 @@ def cmd_revert(args: argparse.Namespace) -> None:
         if p.overwritten_since:
             status = "OVERWRITTEN"
             has_conflicts = True
-        
+
         print(f"  {p.cell:<5}  {p.current_in_audit or '(empty)':<15}  {p.revert_to_value or '(empty)':<15}  {status}")
-        
+
         if p.overwritten_since and not args.force:
             continue
-            
+
         cells_to_write.append(WriteCell(
             roster_name=f"Cell {p.cell}",
             sheet_row=p.sheet_row,
@@ -1118,25 +1118,25 @@ def cmd_revert(args: argparse.Namespace) -> None:
             old_value=p.current_in_audit,
             new_value=p.revert_to_value or "",
         ))
-        
+
     if has_conflicts and not args.force:
         print("\nWARNING: Some cells were modified since this upload. Use --force to overwrite them anyway.")
         if not cells_to_write:
             return
-            
+
     if args.dry_run:
         print("\n[DRY-RUN MODE] Run with --no-dry-run to apply revert.")
         return
-        
+
     if not cells_to_write:
         print("Nothing to revert.")
         return
-        
+
     # To use batch_write, we need a SheetSession.
     from attendance.session_resolver import SheetSession
     from core.auth import get_credentials
     import gspread
-    
+
     gc = gspread.authorize(get_credentials())
     session_info = SheetSession(
         course=course,
@@ -1150,7 +1150,7 @@ def cmd_revert(args: argparse.Namespace) -> None:
         tab=writes_by_target[0].tab,
         gc=gc
     )
-    
+
     write_result = batch_write(
         session_info,
         cells_to_write,
@@ -1158,7 +1158,7 @@ def cmd_revert(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         retry_cfg=cfg["attendance"]["write"].get("retry", {}),
     )
-    
+
     print(f"Reverted {len(write_result.written)} cells.")
 
 
@@ -1190,18 +1190,18 @@ def main() -> None:
     # report
     p_rep = sub.add_parser("report", help="Generate reports")
     rep_sub = p_rep.add_subparsers(dest="report_cmd", required=True)
-    
+
     p_rep_sess = rep_sub.add_parser("session", help="Session summary")
     p_rep_sess.add_argument("--course", required=True)
     p_rep_sess.add_argument("--session", required=True, type=int)
     p_rep_sess.add_argument("--store-dir", default="review_queue")
     p_rep_sess.set_defaults(func=cmd_report_session)
-    
+
     p_rep_streaks = rep_sub.add_parser("streaks", help="Chronic absentee streaks")
     p_rep_streaks.add_argument("--course", required=True)
     p_rep_streaks.add_argument("--consecutive", type=int, default=3)
     p_rep_streaks.set_defaults(func=cmd_report_streaks)
-    
+
     # revert
     p_revt = sub.add_parser("revert", help="Revert a previous upload")
     p_revt.add_argument("upload_id", help="Upload ID to revert")
