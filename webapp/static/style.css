@@ -1,23 +1,20 @@
-/* Custom CSS for Attendance Manager webapp */
+/* Custom CSS for Attendance Manager webapp — Light theme */
 
-/* Design tokens - relaxing dark mode theme */
 :root {
-  --color-primary: #6366f1;
-  --color-primary-soft: #312e81;
-  --color-primary-soft-light: #4338ca;
-  --color-success: #10b981;
-  --color-success-soft: #064e3b;
-  --color-success-soft-light: #065f46;
-  --color-warning: #f59e0b;
-  --color-warning-soft: #78350f;
-  --color-warning-soft-light: #92400e;
-  --color-danger: #ef4444;
-  --color-danger-soft: #7f1d1d;
-  --color-danger-soft-light: #991b1b;
-  --color-text-muted: #94a3b8;
-  --color-surface: #1e293b;
-  --color-surface-light: #334155;
-  --color-border: #334155;
+  --color-primary: #1a73e8;
+  --color-primary-hover: #1557b0;
+  --color-primary-soft: #e8f0fe;
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-soft: #fef3c7;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fee2e2;
+  --color-text-main: #0f172a;
+  --color-text-muted: #64748b;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f8fafc;
+  --color-border: #e2e8f0;
   --radius-sm: 8px;
   --radius-md: 12px;
 }
@@ -27,34 +24,74 @@ div[data-testid="stMetric"] {
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 1rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-/* Button styling improvements */
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] p,
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] label,
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] {
+  color: var(--color-text-muted) !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+}
+
+div[data-testid="stMetric"] [data-testid="stMetricValue"] div,
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+  color: var(--color-text-main) !important;
+  font-size: 1.75rem !important;
+  font-weight: 700 !important;
+}
+
+/* Button styling */
 .stButton > button {
   border-radius: var(--radius-sm);
   font-weight: 600;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-main);
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .stButton > button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background-color: var(--color-surface-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(26, 115, 232, 0.12);
 }
 
-/* Container improvements */
+.stButton > button:active {
+  transform: translateY(0);
+}
+
+/* Primary buttons */
+.stButton > button[kind="primary"],
+.stButton > button[data-testid="baseButton-primary"] {
+  background-color: var(--color-primary);
+  color: #ffffff;
+  border-color: var(--color-primary);
+}
+
+.stButton > button[kind="primary"]:hover,
+.stButton > button[data-testid="baseButton-primary"]:hover {
+  background-color: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: #ffffff;
+}
+
+/* Container spacing */
 div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] {
   gap: 1rem;
 }
 
-/* Status-like elements for review queue */
+/* Status chips */
 .status-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.3rem 0.8rem;
+  padding: 0.25rem 0.75rem;
   border-radius: 999px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -63,20 +100,20 @@ div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] {
 
 .status-chip-success {
   background-color: var(--color-success-soft);
-  color: #a7f3d0;
-  border-color: var(--color-success-soft-light);
+  color: #15803d;
+  border-color: #bbf7d0;
 }
 
 .status-chip-warning {
   background-color: var(--color-warning-soft);
-  color: #fde68a;
-  border-color: var(--color-warning-soft-light);
+  color: #b45309;
+  border-color: #fde68a;
 }
 
 .status-chip-danger {
   background-color: var(--color-danger-soft);
-  color: #fecaca;
-  border-color: var(--color-danger-soft-light);
+  color: #b91c1c;
+  border-color: #fecaca;
 }
 
 /* Quick action cards */
@@ -87,12 +124,12 @@ div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] {
   padding: 1.25rem;
   text-align: center;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .quick-action-card:hover {
   border-color: var(--color-primary);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(26, 115, 232, 0.12);
   transform: translateY(-2px);
 }
 
@@ -102,58 +139,100 @@ div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-/* Table improvements */
-[data-testid="stTable"] {
+/* Tables and Dataframes */
+[data-testid="stTable"],
+[data-testid="stDataFrame"] {
   border-radius: var(--radius-sm);
   overflow: hidden;
+  border: 1px solid var(--color-border);
 }
 
-/* Info/warning/success boxes */
-[data-testid="stInfo"], [data-testid="stWarning"], [data-testid="stSuccess"] {
+/* Info, warning, success callouts */
+[data-testid="stInfo"], [data-testid="stWarning"], [data-testid="stSuccess"], [data-testid="stError"] {
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
 }
 
 /* Sidebar styling */
 [data-testid="stSidebar"] {
-  background-color: var(--color-surface);
+  background-color: #f8fafc;
+  border-right: 1px solid var(--color-border);
 }
 
-/* Input fields and text areas */
-.stTextInput > div > div > input,
-.stTextArea > div > div > textarea,
-.stSelectbox > div > div > select {
-  background-color: var(--color-surface-light);
-  color: var(--text-color);
-  border: 1px solid var(--color-border);
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+  color: var(--color-text-main) !important;
+}
+
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label {
+  color: var(--color-text-main);
+}
+
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  color: var(--color-text-muted) !important;
+}
+
+/* Sidebar selectbox label */
+[data-testid="stSidebar"] .stSelectbox label {
+  color: var(--color-text-main) !important;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+/* Sidebar navigation radio items */
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  color: var(--color-text-main) !important;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+  background-color: rgba(26, 115, 232, 0.08);
+  color: var(--color-primary) !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label p {
+  color: var(--color-text-main) !important;
+  font-weight: 500;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover p {
+  color: var(--color-primary) !important;
 }
 
 /* File uploader */
 [data-testid="stFileUploader"] {
   background-color: var(--color-surface);
-  border: 2px dashed var(--color-border);
+  border: 2px dashed #cbd5e1;
   border-radius: var(--radius-md);
 }
 
-/* Expander styling */
+[data-testid="stFileUploader"]:hover {
+  border-color: var(--color-primary);
+}
+
+/* Expanders */
 .streamlit-expanderHeader {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  background-color: var(--color-surface) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--color-text-main) !important;
 }
 
-/* Tabs styling */
+/* Tabs */
 [data-testid="stTabs"] [data-baseweb="tab-list"] {
-  background-color: var(--color-surface);
-  border-radius: var(--radius-sm);
-}
-
-/* Page headers */
-h1, h2, h3 {
-  letter-spacing: -0.01em;
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
 }
 
 /* Captions / muted text */
@@ -162,56 +241,18 @@ small {
   color: var(--color-text-muted);
 }
 
-/* Sidebar polish */
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #16213a 0%, #1e293b 100%);
+/* Page headers */
+h1, h2, h3 {
+  letter-spacing: -0.01em;
+  color: var(--color-text-main);
 }
 
-[data-testid="stSidebar"] h2 {
-  color: #fff;
-}
-
-/* Radio nav items look like nav links */
-[data-testid="stSidebar"] [data-testid="stRadio"] label {
-  padding: 0.4rem 0.75rem;
-  border-radius: var(--radius-sm);
-  transition: background-color 0.15s ease;
-}
-
-[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
-  background-color: rgba(99, 102, 241, 0.12);
-}
-
-/* Login / centered content */
+/* Centered content border */
 [data-testid="stVerticalBlockBorderWrapper"] {
   border-radius: var(--radius-md);
 }
 
-/* Status chips get subtle glow */
-.status-chip-success { box-shadow: 0 0 8px rgba(16, 185, 129, 0.15); }
-.status-chip-warning { box-shadow: 0 0 8px rgba(245, 158, 11, 0.15); }
-.status-chip-danger  { box-shadow: 0 0 8px rgba(239, 68, 68, 0.15); }
-
-/* Smooth scroll behavior */
+/* Smooth scroll */
 html {
   scroll-behavior: smooth;
-}
-
-/* Custom scrollbar for dark mode */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--color-surface);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-surface-light);
-  border-radius: 5px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-primary);
 }

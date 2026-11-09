@@ -1,3 +1,11 @@
+[theme]
+base = "light"
+primaryColor = "#1a73e8"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f8fafc"
+textColor = "#1e293b"
+font = "sans serif"
+
 [server]
 headless = true
 port = 8501
@@ -7,11 +15,3 @@ gatherUsageStats = false
 
 [client]
 showSidebarNavigation = false
-
-[theme]
-base = "dark"
-primaryColor = "#6366f1"
-backgroundColor = "#0f172a"
-secondaryBackgroundColor = "#1e293b"
-textColor = "#f1f5f9"
-font = "sans serif"
