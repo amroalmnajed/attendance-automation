@@ -25,7 +25,6 @@ from attendance import aliases as aliases_mod
 from attendance import absent as absent_mod
 from attendance import history as history_mod
 from attendance.aliases import AliasStore
-from attendance.concurrent import ConcurrentProcessor, ThreadSafeMatcher, create_processor, create_thread_safe_matcher
 from attendance.gates import check_all_gates
 from attendance.matcher import MatchDecision, MatchResult, ReasonCode, build_matcher
 from attendance.ocr import OcrRow
@@ -57,7 +56,7 @@ def _process_ocr_row(
     type_col: Optional[str],
     allowed_attendance: list[str],
     force: bool,
-    ws: Any,
+    type_col_data: list[str],
 ) -> tuple[Optional[WriteCell], Optional[WriteCell], set[int]]:
     """Process a single OCR row and return cells to write.
 
@@ -167,8 +166,7 @@ def _process_ocr_row(
 
     type_cell = None
     if type_col and session_type:
-        type_current_data = ws.col_values(col_letter_to_index(type_col))
-        type_current = type_current_data[roster_row - 1] if roster_row <= len(type_current_data) else ""
+        type_current = type_col_data[roster_row - 1] if roster_row <= len(type_col_data) else ""
         if not type_current.strip() or force:
             type_cell = WriteCell(
                 roster_name=match_result.best.roster_name,
@@ -218,7 +216,6 @@ def process_rows(
     # touching the global config.  Overrides are merged on top of the base config.
     match_cfg = {**att_cfg.get("match", {}), **(match_cfg_overrides or {})}
     write_cfg = att_cfg.get("write", {})
-    concurrency_cfg = att_cfg.get("concurrency", {})
 
     if session_info is None:
         session_info = resolve(
@@ -242,28 +239,21 @@ def process_rows(
             return summary
 
     col_data = ws.col_values(col_letter_to_index(session_info.session_col))
+    type_col_data = (
+        ws.col_values(col_letter_to_index(session_info.type_col))
+        if session_info.type_col
+        else []
+    )
 
     alias_store = AliasStore(
         path=match_cfg.get("aliases_file", "config/learned_aliases.json"),
         min_confirmations=int(match_cfg.get("alias_min_confirmations", 1)),
     ) if match_cfg.get("learn_aliases", True) else None
 
-    # Use concurrent processing if configured with max_workers > 1
-    max_workers = int(concurrency_cfg.get("max_workers", 1))
-    use_concurrent = max_workers > 1
-
-    if use_concurrent:
-        matcher = create_thread_safe_matcher(
-            match_cfg,
-            alias_lookup=(lambda name: alias_store.lookup(course, name)) if alias_store else None,
-        )
-        processor = create_processor(cfg)
-    else:
-        matcher = build_matcher(
-            match_cfg,
-            alias_lookup=(lambda name: alias_store.lookup(course, name)) if alias_store else None,
-        )
-        processor = None
+    matcher = build_matcher(
+        match_cfg,
+        alias_lookup=(lambda name: alias_store.lookup(course, name)) if alias_store else None,
+    )
 
     matcher.reset()
     review_queue = ReviewQueue(store_dir=review_store_dir)
@@ -274,78 +264,35 @@ def process_rows(
 
     _emit(progress, STAGE_MATCHING)
 
-    if use_concurrent and processor:
-        # Process rows concurrently
-        def match_row(ocr_row: OcrRow) -> tuple[Optional[WriteCell], Optional[WriteCell], set[int]]:
-            return _process_ocr_row(
-                ocr_row=ocr_row,
-                matcher=matcher,
-                session_info=session_info,
-                course=course,
-                session_num=session_num,
-                session_type=session_type,
-                min_conf=min_conf,
-                upload_id=upload_id,
-                image_path=image_path,
-                review_queue=review_queue,
-                summary=summary,
-                col_data=col_data,
-                session_col=session_info.session_col,
-                type_col=session_info.type_col,
-                allowed_attendance=session_info.allowed_attendance,
-                force=force,
-                ws=ws,
-            )
+    for ocr_row in ocr_rows:
+        attendance_cell, type_cell, row_candidates = _process_ocr_row(
+            ocr_row=ocr_row,
+            matcher=matcher,
+            session_info=session_info,
+            course=course,
+            session_num=session_num,
+            session_type=session_type,
+            min_conf=min_conf,
+            upload_id=upload_id,
+            image_path=image_path,
+            review_queue=review_queue,
+            summary=summary,
+            col_data=col_data,
+            session_col=session_info.session_col,
+            type_col=session_info.type_col,
+            allowed_attendance=session_info.allowed_attendance,
+            force=force,
+            type_col_data=type_col_data,
+        )
 
-        results = processor.process_ocr_rows(ocr_rows, match_row)
+        candidate_rows.update(row_candidates)
 
-        for ocr_row, (attendance_cell, type_cell, row_candidates), error in results:
-            if error:
-                log.error(
-                    "ocr_row_failed",
-                    extra={"upload_id": upload_id, "row": ocr_row.row_index, "error": str(error)},
-                )
-                continue
+        if attendance_cell:
+            cells_to_write.append(attendance_cell)
+            matched_rows.add(attendance_cell.sheet_row)
 
-            candidate_rows.update(row_candidates)
-
-            if attendance_cell:
-                cells_to_write.append(attendance_cell)
-                matched_rows.add(attendance_cell.sheet_row)
-
-            if type_cell:
-                cells_to_write.append(type_cell)
-    else:
-        # Process rows sequentially (original behavior)
-        for ocr_row in ocr_rows:
-            attendance_cell, type_cell, row_candidates = _process_ocr_row(
-                ocr_row=ocr_row,
-                matcher=matcher,
-                session_info=session_info,
-                course=course,
-                session_num=session_num,
-                session_type=session_type,
-                min_conf=min_conf,
-                upload_id=upload_id,
-                image_path=image_path,
-                review_queue=review_queue,
-                summary=summary,
-                col_data=col_data,
-                session_col=session_info.session_col,
-                type_col=session_info.type_col,
-                allowed_attendance=session_info.allowed_attendance,
-                force=force,
-                ws=ws,
-            )
-
-            candidate_rows.update(row_candidates)
-
-            if attendance_cell:
-                cells_to_write.append(attendance_cell)
-                matched_rows.add(attendance_cell.sheet_row)
-
-            if type_cell:
-                cells_to_write.append(type_cell)
+        if type_cell:
+            cells_to_write.append(type_cell)
 
     if ocr_rows and all(not r.status_mark for r in ocr_rows):
         msg = "OCR returned no attendance marks for any row; defaulted every row to 'Present'. Verify the sheet."

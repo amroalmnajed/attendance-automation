@@ -220,10 +220,6 @@ attendance:
     retry_max_seconds: 3600         # maximum backoff delay (1 hour)
     cleanup_succeeded_days: 7       # delete succeeded items after this many days
 
-  concurrency:
-    max_workers: 4                  # maximum number of worker threads for concurrent processing
-    timeout: null                   # optional timeout for individual tasks (seconds)
-
   review:
     store: local_json               # gcs_json | local_json
     local_dir: review_queue
