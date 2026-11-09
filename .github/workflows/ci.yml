@@ -12,6 +12,8 @@ jobs:
         with:
           python-version-file: .python-version
           cache: pip
-      - run: pip install -r requirements.txt ruff
+      - run: pip install -r requirements-dev.txt
       - run: ruff check .
-      - run: pytest -q
+      - run: pip-audit -r requirements.txt
+        continue-on-error: true
+      - run: pytest -q --cov=attendance --cov-fail-under=65

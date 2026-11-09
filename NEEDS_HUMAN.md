@@ -13,3 +13,13 @@ roles.py is still keyed on Telegram IDs; webapp auth treats everyone as allowed.
 | attendance/ocr_corrections.py | attendance/ocr.py, attendance/resolver_ops.py | used |
 
 Deleted in this phase (only referenced by their own file, tests, and docs): attendance/sync.py, attendance/migrate.py.
+
+## Phase 7 — ruff
+
+Added flake8-bugbear (`B`) and E722 to ruff select. 30 new violations exceeded the 25-error fix budget, so these rule codes are ignored in pyproject.toml pending Part 2 cleanup:
+
+- B007 unused-loop-control-variable (8)
+- B017 assert-raises-exception (9)
+- B023 function-uses-loop-variable (1)
+- B904 raise-without-from-inside-except (6)
+- B905 zip-without-explicit-strict (6)

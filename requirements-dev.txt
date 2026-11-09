@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest
+pytest-cov
+pytest-benchmark
+ruff
+pre-commit
+pip-audit
