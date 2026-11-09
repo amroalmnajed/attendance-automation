@@ -23,3 +23,22 @@ Added flake8-bugbear (`B`) and E722 to ruff select. 30 new violations exceeded t
 - B023 function-uses-loop-variable (1)
 - B904 raise-without-from-inside-except (6)
 - B905 zip-without-explicit-strict (6)
+
+## Item 5 — roles.py architectural decision (documented, code kept)
+
+`attendance/roles.py` implements Telegram-ID-based RBAC, but it is NOT dead code:
+it is imported by live paths — `attendance/row_processor.py`, `attendance/writer.py`,
+`attendance/resolver_ops.py` (all call `has_permission(...)` for `edit_attendance`),
+`attendance/health.py` and `attendance/reminders.py` (`authorized_ids`),
+`attendance/alias_admin.py` (wrapper), and `webapp/auth.py` (`allowlist_configured`,
+`ROLE_PERMISSIONS`). Deleting it would break write-permission checks in the live
+review-resolve and sheet-write paths.
+
+Decision: **(b) keep roles.py as the single source of truth for permission→role
+mapping**, shared by the webapp (`check_permission`) and any future bot. The
+Telegram-ID *identifier* plumbing is legacy-shaped (uids are ints), but the
+`ROLE_PERMISSIONS` table and `has_permission` signature are identifier-agnostic
+enough (`user_identifier` params in writer/resolver_ops) to serve webapp users via
+`rbac.webapp_users` name→role mapping. No code was deleted; the follow-up work is
+Item 6 (default-deny in `webapp/auth.py`) which makes the webapp actually consult
+this mapping instead of allowing everything.
