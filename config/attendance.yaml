@@ -3,7 +3,7 @@ core:
     env: dev                        # dev | prod
     timezone: Africa/Cairo
     log_level: INFO
-    dry_run_default: false          # set false only after go-live checklist passes
+    dry_run_default: false          # false = writes to the real sheet. true = preview only. Currently LIVE.
 
   auth:
     credentials_env: GOOGLE_APPLICATION_CREDENTIALS  # unset on Cloud Run (attached SA)
@@ -23,7 +23,7 @@ core:
 
 attendance:
   ingest:
-    channel: cli                    # google_form_drive | drive_folder | telegram | cli
+    channel: cli                    # google_form_drive | drive_folder | cli
     poll_interval_s: 300
     form_responses_sheet_id_env: INGEST_SHEET_ID
     inbox_folder_id_env: INBOX_FOLDER_ID
@@ -39,7 +39,7 @@ attendance:
     # never    = skip the preview entirely
     names_preview: on_issues
 
-    # Several photos for ONE upload (a Telegram album, or photos sent in quick succession).
+    # Several photos for ONE upload (an album, or photos sent in quick succession).
     multi_photo:
       enabled: true
       max_photos: 6
@@ -48,11 +48,6 @@ attendance:
   # "Mark N absent?" button after an upload. crash and main ONLY: g9 / g10 can never be
   # offered, even if listed here. Only EMPTY cells are written (overwrite: refuse still applies),
   # real writes are audited (so /revert works) and a dry-run upload only previews.
-  # Bot authorized users. IDs here are added to the AUTHORIZED_TELEGRAM_IDS env var
-  # (comma-separated). If NO authorized user is configured, everyone is allowed.
-  authorized:
-    telegram_ids: []
-
   # Database configuration
   database:
     path: attendance.db             # SQLite database path
@@ -60,15 +55,6 @@ attendance:
     backup_enabled: true            # Enable automatic database backups
     backup_dir: db_backups          # Directory for database backups
     backup_keep_days: 30            # Keep backups for 30 days
-
-  # ML matching configuration
-  ml_matching:
-    enabled: true                   # Enable ML-based semantic matching
-    model: paraphrase-multilingual-MiniLM-L12-v2  # Sentence-transformers model
-    cache_embeddings: true          # Cache embeddings for performance
-    retrain_interval_days: 7        # Retrain model weekly on new aliases
-    threshold: 0.75                 # Cosine similarity threshold for ML matches
-    max_batch_size: 100             # Maximum names to embed in one batch
 
   # Caching configuration
   caching:
@@ -93,9 +79,11 @@ attendance:
         telegram_ids: []
       admin:
         telegram_ids: []
+    webapp_users:
+      Amro: admin
     user_assignments: {}
 
-  # Feature 12: missing-attendance reminders. OFF unless enabled. Needs python-telegram-bot[job-queue].
+  # Feature 12: missing-attendance reminders. OFF unless enabled.
   # Uses core.app.timezone. A reminder is sent once per expected class if no upload is recorded for that
   # course on that date (counts come from the upload history, not from Google Sheets). Text has no names.
   reminders:
@@ -114,7 +102,7 @@ attendance:
         - {day: thu, time: "22:00"}
       g9:
         - {day: fri, time: "22:00"}
-        - {day: sat, time: "22:00"}    
+        - {day: sat, time: "22:00"}
   # Feature 13: alerts to ADMINS (never teachers) when Gemini/Sheets keep failing or review items wait too long.
   # Counts only, no names. One alert per kind per cooldown. Real uploads only (dry runs record nothing).
   # The review-age check needs the scheduler; Gemini/Sheets alerts do not. Admin command: /health
@@ -181,13 +169,13 @@ attendance:
     margin_strong: 20
     # Learned aliases: reviewer decisions become future auto-accepts (per course).
     learn_aliases: true
-    aliases_file: config/learned_aliases.json
+    aliases_file: learned_aliases.json
     alias_min_confirmations: 1      # raise to 2 to require two identical confirmations
     # Feature 15: spelling differences seen in reviewer decisions are collected as SUGGESTIONS here
     # (never applied automatically). Review/approve them with:  aliases variants review
     variant_learning:
       enabled: true
-      suggestions_file: config/variant_suggestions.json
+      suggestions_file: variant_suggestions.json
       min_similarity: 0.7           # how alike two spellings must be to be suggested as the same name
     alias_stale_days: 90            # aliases not used / not confirmed for this long are flagged as old
     weights:
@@ -198,9 +186,6 @@ attendance:
     skip_row_patterns:
       - '\(Ref\)\s*$'               # row label "AAAAAAAAAAAAAAAA (Ref)" in all sheets
     missing_student_policy: report  # ignore | report | mark_absent
-    use_ml: true                    # Enable ML semantic matching
-    ml_threshold: 0.75              # Cosine similarity threshold for ML matches
-    ml_margin: 0.05                 # Required margin between top 2 ML candidates for auto-accept
 
   write:
     session_check: strict           # strict: SESSION_MISMATCH blocks the whole upload
@@ -219,10 +204,6 @@ attendance:
     retry_base_seconds: 2           # base for exponential backoff
     retry_max_seconds: 3600         # maximum backoff delay (1 hour)
     cleanup_succeeded_days: 7       # delete succeeded items after this many days
-
-  concurrency:
-    max_workers: 4                  # maximum number of worker threads for concurrent processing
-    timeout: null                   # optional timeout for individual tasks (seconds)
 
   review:
     store: local_json               # gcs_json | local_json

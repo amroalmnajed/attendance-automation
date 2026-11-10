@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
 from attendance.cache import get_cache
+from core.logger import get_logger
+
+log = get_logger("roles")
 
 AUTHORIZED_ENV = "AUTHORIZED_TELEGRAM_IDS"
 
@@ -93,10 +96,13 @@ def allowlist_configured(cfg: Optional[dict], env: Optional[dict] = None) -> boo
             for role_config in roles.values():
                 if isinstance(role_config, dict) and role_config.get("telegram_ids"):
                     return True
+        webapp_users = rbac_cfg.get("webapp_users", {})
+        if isinstance(webapp_users, dict) and webapp_users:
+            return True
     return False
 
 
-def _get_db_role(uid: Optional[int]) -> Optional[str]:
+def _get_db_role(uid: Optional[Any]) -> Optional[str]:
     """Get user role from database. Returns None if user not found or on error."""
     if uid is None:
         return None
@@ -113,7 +119,14 @@ def _get_db_role(uid: Optional[int]) -> Optional[str]:
 
         session = get_session()
         try:
-            user = session.query(User).filter(User.telegram_id == uid, User.is_active == True).first()
+            user = None
+            try:
+                uid_int = int(str(uid).strip())
+                user = session.query(User).filter(User.telegram_id == uid_int, User.is_active == True).first()
+            except ValueError:
+                pass
+            if not user:
+                user = session.query(User).filter(User.username == str(uid).strip(), User.is_active == True).first()
             if user:
                 role = user.role
                 cache.set(cache_key, role, "permissions", ttl=300)
@@ -156,8 +169,8 @@ def _get_db_course_permissions(uid: Optional[int], course_id: Optional[int]) -> 
                 return perm.permission_level
         finally:
             session.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("roles_swallowed", extra={"error": str(exc)})
 
     return None
 
@@ -185,8 +198,8 @@ def _get_course_id_from_key(course_key: str) -> Optional[int]:
                 return course.course_id
         finally:
             session.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("roles_swallowed", extra={"error": str(exc)})
 
     return None
 
@@ -199,7 +212,7 @@ def _get_default_role(cfg: Optional[dict]) -> Optional[str]:
     return None
 
 
-def role_of(uid: Optional[int], cfg: Optional[dict], env: Optional[dict] = None) -> Optional[str]:
+def role_of(uid: Optional[Any], cfg: Optional[dict], env: Optional[dict] = None) -> Optional[str]:
     """Determine the role of a user. Returns the highest role (admin > editor > viewer > authorized).
 
     Checks database first, falls back to config if database has no user records.
@@ -213,18 +226,29 @@ def role_of(uid: Optional[int], cfg: Optional[dict], env: Optional[dict] = None)
     if db_role:
         return db_role
 
-    # Fallback to config-based lookups
-    # Check new granular roles first (highest to lowest)
-    if uid in role_ids(cfg, ADMIN, env):
-        return ADMIN
-    if uid in role_ids(cfg, EDITOR, env):
-        return EDITOR
-    if uid in role_ids(cfg, VIEWER, env):
-        return VIEWER
+    # Check webapp_users from config (supports string usernames, case-insensitive)
+    rbac_cfg = ((cfg or {}).get("attendance") or {}).get("rbac", {})
+    if isinstance(rbac_cfg, dict):
+        webapp_users = rbac_cfg.get("webapp_users", {})
+        if isinstance(webapp_users, dict):
+            uid_str = str(uid).strip().lower()
+            for w_user, w_role in webapp_users.items():
+                if str(w_user).strip().lower() == uid_str:
+                    return w_role
 
-    # Fallback to legacy authorized role
-    if uid in authorized_ids(cfg, env):
-        return AUTHORIZED
+    # Fallback to config-based lookups for integer Telegram IDs
+    try:
+        uid_int = int(str(uid).strip())
+        if uid_int in role_ids(cfg, ADMIN, env):
+            return ADMIN
+        if uid_int in role_ids(cfg, EDITOR, env):
+            return EDITOR
+        if uid_int in role_ids(cfg, VIEWER, env):
+            return VIEWER
+        if uid_int in authorized_ids(cfg, env):
+            return AUTHORIZED
+    except (ValueError, TypeError):
+        pass
 
     # If no specific role found, use default_role from config
     default_role = _get_default_role(cfg)
@@ -234,7 +258,7 @@ def role_of(uid: Optional[int], cfg: Optional[dict], env: Optional[dict] = None)
     return None
 
 
-def has_permission(uid: Optional[int], permission: str, cfg: Optional[dict], env: Optional[dict] = None,
+def has_permission(uid: Optional[Any], permission: str, cfg: Optional[dict], env: Optional[dict] = None,
                    course: Optional[str] = None) -> bool:
     """Check if a user has a specific permission. Supports per-course access control."""
     role = role_of(uid, cfg, env)
@@ -256,7 +280,7 @@ def has_permission(uid: Optional[int], permission: str, cfg: Optional[dict], env
     return True
 
 
-def has_course_access(uid: Optional[int], course: str, cfg: Optional[dict], env: Optional[dict] = None) -> bool:
+def has_course_access(uid: Optional[Any], course: str, cfg: Optional[dict], env: Optional[dict] = None) -> bool:
     """Check if a user has access to a specific course.
 
     Checks database for per-course permissions first, falls back to config.
@@ -287,16 +311,18 @@ def has_course_access(uid: Optional[int], course: str, cfg: Optional[dict], env:
         return False
 
     user_assignments = rbac_cfg.get("user_assignments", {})
-    if not isinstance(user_assignments, dict):
-        return False
+    if not isinstance(user_assignments, dict) or not user_assignments:
+        # If no per-course assignments are configured, editor role has access to all courses
+        return True
 
-    user_key = str(uid) if uid is not None else None
+    user_key = str(uid).strip().lower() if uid is not None else None
     if user_key is None:
         return False
 
-    user_courses = user_assignments.get(user_key, [])
-    if isinstance(user_courses, (list, tuple)):
-        return course in user_courses
+    for u_key, u_courses in user_assignments.items():
+        if str(u_key).strip().lower() == user_key:
+            if isinstance(u_courses, (list, tuple)):
+                return course in u_courses
 
     return False
 
@@ -456,8 +482,8 @@ def guard(level: str, load_cfg: Callable[[], dict], get_log: Optional[Callable[[
                 try:
                     if get_log:
                         get_log().error("role_check_failed", extra={"error": type(exc).__name__})
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("roles_swallowed", extra={"error": str(exc)})
             if d.allowed:
                 return await fn(update, context, *a, **k)
             await _refuse(update, context, d, level, uid)
