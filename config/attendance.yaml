@@ -123,7 +123,7 @@ attendance:
 
   absent_button:
     enabled: true
-    courses: [crash, main]
+    courses: []
     min_matched: 3                  # never offer on a near-empty / unreadable upload
     block_when_pending_review: true # tap is refused while this upload still has review items
 
@@ -215,9 +215,7 @@ attendance:
   zoom_csv:
     enabled: true
     meeting_id_mappings:
-      "81795786552": main
       "83570905451": g10
-      "81887392957": crash
       "82572049402": g9
     teacher_name: "Yaman"
     teacher_fuzzy_match_threshold: 80
@@ -265,31 +263,6 @@ attendance:
     Absent: Absent
 
   courses:
-    crash:
-      sheet_id_env: CRASH_SHEET_ID
-      tab: Crash-Attendance
-      layout: single                # single | typed_pair
-      name_col: A
-      header_row: 1                 # "Session N" in row 1
-      session_header_pattern: '^Session (\d+)$'
-      date_row: 2                   # text date e.g. "Saturday, July 4"
-      first_student_row: 5
-      hidden_rows: [9, 19]
-      hidden_cols: [B, C]
-      allowed_values: [Present, Late, Not complete, Absent]
-
-    main:
-      sheet_id_env: MAIN_SHEET_ID
-      tab: Main-Attendance
-      layout: single
-      name_col: A
-      header_row: 1                 # "Session N" confirmed by discover_sheets.py
-      session_header_pattern: '^Session (\d+)$'
-      date_row: 2
-      first_student_row: 5
-      hidden_cols: [B, C]
-      allowed_values: [Present, Late, Not complete, Absent]
-
     g10:
       sheet_id_env: G10_SHEET_ID
       tab: Main-Attendance

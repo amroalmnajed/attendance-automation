@@ -23,10 +23,10 @@ def test_load_real_attendance_yaml():
     model = load_config_model("config/attendance.yaml")
     assert isinstance(model, FullConfig)
     assert model.attendance is not None
-    assert "crash" in model.attendance.courses
-    assert "main" in model.attendance.courses
     assert "g10" in model.attendance.courses
     assert "g9" in model.attendance.courses
+    assert "crash" not in model.attendance.courses
+    assert "main" not in model.attendance.courses
 
 
 def test_ocr_config_defaults():
