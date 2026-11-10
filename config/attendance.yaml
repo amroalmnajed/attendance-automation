@@ -79,6 +79,8 @@ attendance:
         telegram_ids: []
       admin:
         telegram_ids: []
+    webapp_users:
+      Amro: admin
     user_assignments: {}
 
   # Feature 12: missing-attendance reminders. OFF unless enabled.
